@@ -1,28 +1,54 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { HeadersInit } from 'undici';
 
 import { createMatomoClient } from '../src/index.js';
 
 const baseUrl = 'https://matomo.example.com';
 const token = 'token';
 
-const createFetchMock = <T>(data: T) =>
+const createFetchMock = <T>(data: T, headersInit?: HeadersInit) =>
   vi.fn().mockResolvedValue({
     ok: true,
     status: 200,
     statusText: 'OK',
     json: async () => data,
     text: async () => JSON.stringify(data),
+    headers: new Headers(headersInit),
   });
 
-const createSequencedFetchMock = (responses: unknown[]) => {
+type MockResponse<T> =
+  | T
+  | {
+      data: T;
+      headers?: HeadersInit;
+      status?: number;
+      statusText?: string;
+      ok?: boolean;
+    };
+
+const createSequencedFetchMock = (responses: MockResponse<unknown>[]) => {
   const mock = vi.fn();
   responses.forEach(response => {
+    const isDetailed = typeof response === 'object' && response !== null && 'data' in response;
+    const data = isDetailed ? (response as { data: unknown }).data : response;
+    const headersInit = isDetailed ? (response as { headers?: HeadersInit }).headers : undefined;
+    const status = isDetailed && (response as { status?: number }).status !== undefined
+      ? (response as { status?: number }).status
+      : 200;
+    const statusText = isDetailed && (response as { statusText?: string }).statusText
+      ? (response as { statusText?: string }).statusText
+      : 'OK';
+    const ok = isDetailed && (response as { ok?: boolean }).ok !== undefined
+      ? Boolean((response as { ok?: boolean }).ok)
+      : status >= 200 && status < 300;
+
     mock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      json: async () => response,
-      text: async () => JSON.stringify(response),
+      ok,
+      status,
+      statusText,
+      json: async () => data,
+      text: async () => JSON.stringify(data),
+      headers: new Headers(headersInit),
     });
   });
   return mock;
@@ -661,9 +687,52 @@ describe('MatomoClient', () => {
     expect(body).toContain('e_c=cta');
   });
 
+  it('returns unknown rate limit status before any requests', () => {
+    const client = createMatomoClient({ baseUrl, tokenAuth: token, defaultSiteId: 1 });
+    const status = client.getRateLimitStatus();
+    expect(status.status).toBe('unknown');
+    expect(status.message).toContain('did not include rate limit headers');
+  });
+
+  it('captures rate limit headers from Matomo responses', async () => {
+    const headers = {
+      'x-matomo-rate-limit-limit': '100',
+      'x-matomo-rate-limit-remaining': '5',
+      'x-matomo-rate-limit-reset': '60',
+      date: 'Wed, 01 Jan 2025 00:00:00 GMT',
+    } satisfies HeadersInit;
+
+    const fetchMock = createSequencedFetchMock([
+      { data: { nb_visits: 10 }, headers },
+      { data: { nb_pageviews: '20' }, headers },
+    ]);
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = createMatomoClient({ baseUrl, tokenAuth: token, defaultSiteId: 2 });
+    await client.getKeyNumbers();
+
+    const status = client.getRateLimitStatus();
+    expect(status.status).toBe('warn');
+    expect(status.limit).toBe(100);
+    expect(status.remaining).toBe(5);
+    expect(status.resetAt).toBeDefined();
+    expect(status.message).toContain('Remaining 5');
+  });
+
   describe('getHealthStatus', () => {
     it('returns healthy status when all checks pass', async () => {
-      const fetchMock = createSequencedFetchMock(['3.14.0']);
+      const fetchMock = createSequencedFetchMock([
+        {
+          data: '3.14.0',
+          headers: {
+            'x-matomo-rate-limit-limit': '120',
+            'x-matomo-rate-limit-remaining': '90',
+            'x-matomo-rate-limit-reset': '60',
+            date: 'Wed, 01 Jan 2025 00:00:00 GMT',
+          },
+        },
+      ]);
       vi.stubGlobal('fetch', fetchMock);
 
       const client = createMatomoClient({ baseUrl, tokenAuth: token, defaultSiteId: 1 });
@@ -671,12 +740,17 @@ describe('MatomoClient', () => {
 
       expect(result.status).toBe('healthy');
       expect(result.timestamp).toBeDefined();
-      expect(result.checks).toHaveLength(3); // matomo-api, reports-cache, tracking-queue
-      
+      expect(result.checks).toHaveLength(4); // matomo-api, reports-cache, tracking-queue, rate-limit
+
       const matomoCheck = result.checks.find(c => c.name === 'matomo-api');
       expect(matomoCheck?.status).toBe('pass');
       expect(matomoCheck?.componentType).toBe('service');
       expect(matomoCheck?.observedUnit).toBe('ms');
+
+      const rateLimitCheck = result.checks.find(c => c.name === 'rate-limit');
+      expect(rateLimitCheck?.status).toBe('pass');
+      expect(rateLimitCheck?.observedUnit).toBe('requests');
+      expect(rateLimitCheck?.output).toContain('Remaining 90');
     });
 
     it('returns unhealthy status when API fails', async () => {
@@ -687,27 +761,62 @@ describe('MatomoClient', () => {
       const result = await client.getHealthStatus();
 
       expect(result.status).toBe('unhealthy');
-      
+
       const matomoCheck = result.checks.find(c => c.name === 'matomo-api');
       expect(matomoCheck?.status).toBe('fail');
       expect(matomoCheck?.output).toContain('Failed to reach Matomo instance');
+
+      const rateLimitCheck = result.checks.find(c => c.name === 'rate-limit');
+      expect(rateLimitCheck?.status).toBe('warn');
+      expect(rateLimitCheck?.output).toContain('did not include rate limit headers');
     });
 
     it('includes site access check when requested', async () => {
       const fetchMock = createSequencedFetchMock([
-        '3.14.0', // API.getVersion
-        { idsite: '5', name: 'Test Site' } // SitesManager.getSiteFromId
+        {
+          data: '3.14.0',
+          headers: {
+            'x-matomo-rate-limit-limit': '120',
+            'x-matomo-rate-limit-remaining': '110',
+            'x-matomo-rate-limit-reset': '60',
+            date: 'Wed, 01 Jan 2025 00:00:00 GMT',
+          },
+        },
+        { data: { idsite: '5', name: 'Test Site' } },
       ]);
       vi.stubGlobal('fetch', fetchMock);
 
       const client = createMatomoClient({ baseUrl, tokenAuth: token, defaultSiteId: 5 });
       const result = await client.getHealthStatus({ includeDetails: true });
 
-      expect(result.checks).toHaveLength(4); // includes site-access check
-      
+      expect(result.checks).toHaveLength(5); // includes site-access check
+
       const siteCheck = result.checks.find(c => c.name === 'site-access');
       expect(siteCheck?.status).toBe('pass');
       expect(siteCheck?.output).toContain('Site ID 5 accessible');
+    });
+
+    it('marks rate limit check as warning when remaining capacity is low', async () => {
+      const fetchMock = createSequencedFetchMock([
+        {
+          data: '3.14.0',
+          headers: {
+            'x-matomo-rate-limit-limit': '100',
+            'x-matomo-rate-limit-remaining': '2',
+            'x-matomo-rate-limit-reset': '30',
+            date: 'Wed, 01 Jan 2025 00:00:00 GMT',
+          },
+        },
+      ]);
+      vi.stubGlobal('fetch', fetchMock);
+
+      const client = createMatomoClient({ baseUrl, tokenAuth: token, defaultSiteId: 1 });
+      const result = await client.getHealthStatus();
+
+      expect(result.status).toBe('degraded');
+      const rateLimitCheck = result.checks.find(c => c.name === 'rate-limit');
+      expect(rateLimitCheck?.status).toBe('warn');
+      expect(rateLimitCheck?.output).toContain('Remaining 2');
     });
   });
 });

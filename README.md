@@ -148,10 +148,26 @@ curl -H "Authorization: Bearer your-token" \
     {
       "name": "reports-cache",
       "status": "pass",
-      "componentType": "cache", 
+      "componentType": "cache",
       "observedValue": 85.5,
       "observedUnit": "%",
       "output": "Hit rate: 85.5% (342/400 requests)"
+    },
+    {
+      "name": "tracking-queue",
+      "status": "pass",
+      "componentType": "queue",
+      "observedValue": 0,
+      "observedUnit": "pending",
+      "output": "Queue processing normally"
+    },
+    {
+      "name": "rate-limit",
+      "status": "warn",
+      "componentType": "service",
+      "observedValue": 4,
+      "observedUnit": "requests",
+      "output": "Limit 120 • Remaining 4 • Resets at 2025-09-30T15:35:00.000Z"
     }
   ]
 }
@@ -160,6 +176,7 @@ curl -H "Authorization: Bearer your-token" \
 ### Health Check Components
 - **Matomo API Connectivity**: Response time and reachability
 - **Reports Cache Performance**: Hit rates with warning thresholds (warn <20%, fail <5%)
+- **Rate Limit Capacity**: Remaining Matomo API allowance (warn when <10% or missing headers, fail when depleted)
 - **Tracking Queue Status**: Queue processing health
 - **Site Access** *(optional)*: Site-specific permission verification
 

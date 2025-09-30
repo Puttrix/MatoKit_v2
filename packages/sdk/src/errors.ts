@@ -1,5 +1,14 @@
 export type MatomoErrorCode = string | number | undefined;
 
+export interface MatomoRateLimitInfo {
+  limit?: number;
+  remaining?: number;
+  resetInSeconds?: number;
+  resetAt?: string;
+  retryAfterSeconds?: number;
+  observedAt?: string;
+}
+
 export interface MatomoErrorDetails {
   status?: number;
   code?: MatomoErrorCode;
@@ -7,6 +16,7 @@ export interface MatomoErrorDetails {
   endpoint?: string;
   payload?: unknown;
   cause?: unknown;
+  rateLimit?: MatomoRateLimitInfo;
 }
 
 type GuidanceKey = 'auth' | 'permission' | 'rate-limit' | 'client' | 'server' | 'parse' | 'network' | 'unknown';
@@ -56,6 +66,7 @@ export class MatomoApiError extends Error {
   readonly endpoint?: string;
   readonly payload?: unknown;
   readonly guidance: string;
+  readonly rateLimit?: MatomoRateLimitInfo;
 
   constructor(message: string, guidanceKey: GuidanceKey, details: MatomoErrorDetails = {}) {
     super(message);
@@ -66,6 +77,7 @@ export class MatomoApiError extends Error {
     this.endpoint = details.endpoint;
     this.payload = details.payload;
     this.guidance = resolveGuidance(guidanceKey, message, details.code);
+    this.rateLimit = details.rateLimit;
 
     if (details.cause instanceof Error) {
       type ErrorWithCause = Error & { cause?: unknown };
@@ -84,6 +96,7 @@ export class MatomoApiError extends Error {
       code: this.code,
       guidance: this.guidance,
       endpoint: this.endpoint,
+      rateLimit: this.rateLimit,
     };
   }
 }
@@ -161,10 +174,11 @@ export interface MatomoHttpErrorContext {
   endpoint: string;
   bodyText?: string;
   payload?: unknown;
+  rateLimit?: MatomoRateLimitInfo;
 }
 
 export function classifyMatomoError(context: MatomoHttpErrorContext): MatomoApiError {
-  const { status, statusText, endpoint, payload, bodyText } = context;
+  const { status, statusText, endpoint, payload, bodyText, rateLimit } = context;
   const extracted = extractMatomoError(payload);
   const messageFromPayload = extracted?.message;
   const code = extracted?.code;
@@ -176,6 +190,7 @@ export function classifyMatomoError(context: MatomoHttpErrorContext): MatomoApiE
     body: bodyText,
     endpoint,
     payload,
+    rateLimit,
   };
 
   if (status === 401) {

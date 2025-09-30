@@ -178,6 +178,19 @@ export interface GetHealthStatusInput {
   siteId?: number;
 }
 
+export type RateLimitStatusLevel = 'unknown' | 'normal' | 'warn' | 'depleted';
+
+export interface RateLimitStatus {
+  status: RateLimitStatusLevel;
+  limit?: number;
+  remaining?: number;
+  resetInSeconds?: number;
+  resetAt?: string;
+  retryAfterSeconds?: number;
+  observedAt?: string;
+  message: string;
+}
+
 const keyNumberNumericFields: Array<keyof KeyNumbers> = [
   'nb_visits',
   'nb_uniq_visitors',
@@ -364,6 +377,61 @@ export class MatomoClient {
     const value = override ?? this.defaultSiteId;
     assertSiteId(value);
     return value;
+  }
+
+  getRateLimitStatus(): RateLimitStatus {
+    const info = this.http.getRateLimitInfo();
+
+    if (!info) {
+      return {
+        status: 'unknown',
+        message: 'Matomo did not include rate limit headers on the last response.',
+      };
+    }
+
+    const { limit, remaining, resetInSeconds, resetAt, retryAfterSeconds, observedAt } = info;
+
+    let status: RateLimitStatusLevel = 'normal';
+    if (remaining === undefined) {
+      status = 'unknown';
+    } else if (remaining <= 0) {
+      status = 'depleted';
+    } else {
+      const thresholdBase = typeof limit === 'number' && limit > 0 ? limit : undefined;
+      const threshold = thresholdBase !== undefined ? Math.max(1, Math.floor(thresholdBase * 0.1)) : 1;
+      if (remaining <= threshold) {
+        status = 'warn';
+      }
+    }
+
+    const parts: string[] = [];
+    if (typeof limit === 'number') {
+      parts.push(`Limit ${limit}`);
+    }
+    if (typeof remaining === 'number') {
+      parts.push(`Remaining ${remaining}`);
+    }
+    if (resetAt) {
+      parts.push(`Resets at ${resetAt}`);
+    } else if (typeof resetInSeconds === 'number') {
+      parts.push(`Resets in ${resetInSeconds}s`);
+    }
+    if (typeof retryAfterSeconds === 'number') {
+      parts.push(`Retry after ${retryAfterSeconds}s`);
+    }
+
+    const message = parts.length > 0 ? parts.join(' • ') : 'Rate limit headers observed.';
+
+    return {
+      status,
+      limit,
+      remaining,
+      resetInSeconds,
+      resetAt,
+      retryAfterSeconds,
+      observedAt,
+      message,
+    };
   }
 
   async getKeyNumbers(input: GetKeyNumbersInput = {}): Promise<KeyNumbers> {
@@ -798,6 +866,25 @@ export class MatomoClient {
       observedUnit: 'pending',
       time: timestamp,
       output: 'Queue processing normally',
+    });
+
+    const rateLimitStatus = this.getRateLimitStatus();
+    const rateLimitCheckStatus: HealthCheck['status'] =
+      rateLimitStatus.status === 'depleted'
+        ? 'fail'
+        : rateLimitStatus.status === 'warn' || rateLimitStatus.status === 'unknown'
+        ? 'warn'
+        : 'pass';
+
+    checks.push({
+      name: 'rate-limit',
+      status: rateLimitCheckStatus,
+      componentType: 'service',
+      ...(typeof rateLimitStatus.remaining === 'number'
+        ? { observedValue: rateLimitStatus.remaining, observedUnit: 'requests' as const }
+        : {}),
+      time: timestamp,
+      output: rateLimitStatus.message,
     });
 
     // Site access check (if siteId provided and details requested)

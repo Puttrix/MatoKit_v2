@@ -6,6 +6,7 @@ import {
   classifyMatomoError,
   classifyMatomoResultError,
   extractMatomoError,
+  type MatomoRateLimitInfo,
 } from './errors.js';
 
 export interface MatomoRequestOptions {
@@ -17,6 +18,46 @@ export interface MatomoResponse<T> {
   data: T;
   status: number;
   ok: boolean;
+  rateLimit?: MatomoRateLimitInfo;
+}
+
+function parseNumericHeader(headers: Headers, name: string): number | undefined {
+  const value = headers.get(name);
+  if (!value) return undefined;
+  const numeric = Number.parseInt(value, 10);
+  return Number.isNaN(numeric) ? undefined : numeric;
+}
+
+function parseRateLimitHeaders(headers: Headers): MatomoRateLimitInfo | undefined {
+  const limit = parseNumericHeader(headers, 'x-matomo-rate-limit-limit');
+  const remaining = parseNumericHeader(headers, 'x-matomo-rate-limit-remaining');
+  const resetInSeconds = parseNumericHeader(headers, 'x-matomo-rate-limit-reset');
+  const retryAfterSeconds = parseNumericHeader(headers, 'retry-after');
+
+  if (
+    limit === undefined &&
+    remaining === undefined &&
+    resetInSeconds === undefined &&
+    retryAfterSeconds === undefined
+  ) {
+    return undefined;
+  }
+
+  const dateHeader = headers.get('date');
+  const observedAtDate = dateHeader ? new Date(dateHeader) : new Date();
+  const rateLimit: MatomoRateLimitInfo = {
+    limit,
+    remaining,
+    resetInSeconds,
+    retryAfterSeconds,
+    observedAt: observedAtDate.toISOString(),
+  };
+
+  if (resetInSeconds !== undefined) {
+    rateLimit.resetAt = new Date(observedAtDate.getTime() + resetInSeconds * 1000).toISOString();
+  }
+
+  return rateLimit;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -35,6 +76,7 @@ function normalizeBaseUrl(baseUrl: string): string {
 export class MatomoHttpClient {
   private readonly baseEndpoint: string;
   private readonly token: string;
+  private lastRateLimit?: MatomoRateLimitInfo;
 
   constructor(baseUrl: string, tokenAuth: string) {
     this.baseEndpoint = normalizeBaseUrl(baseUrl);
@@ -73,6 +115,14 @@ export class MatomoHttpClient {
       });
     }
 
+    const responseHeaders =
+      res && 'headers' in res && res.headers ? new Headers(res.headers as HeadersInit) : new Headers();
+
+    const rateLimit = parseRateLimitHeaders(responseHeaders);
+    if (rateLimit) {
+      this.lastRateLimit = rateLimit;
+    }
+
     let bodyText: string | undefined;
     try {
       bodyText = await res.text();
@@ -109,6 +159,7 @@ export class MatomoHttpClient {
         endpoint,
         bodyText,
         payload,
+        rateLimit,
       });
     }
 
@@ -123,7 +174,12 @@ export class MatomoHttpClient {
       data: payload as T,
       status: res.status,
       ok: res.ok,
+      rateLimit,
     };
+  }
+
+  getRateLimitInfo(): MatomoRateLimitInfo | undefined {
+    return this.lastRateLimit;
   }
 }
 

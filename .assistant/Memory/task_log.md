@@ -1,4 +1,5 @@
 # Task Log
+| 2025-10-01 | codex | Implemented SDK-010E rate limit awareness | done | Captured Matomo rate limit headers, surfaced health warnings, added docs/tests for monitoring |
 | 2025-09-30 | putte | Documented SDK-010C health monitoring | done | Updated README with health monitoring section, tool endpoints table, and sample responses with comprehensive examples |
 | 2025-09-30 | putte | Implemented SDK-010C service health monitoring | done | Added getHealthStatus() method to MatomoClient with comprehensive health checks for API, cache, and dependencies plus /tools/get-health-status endpoint |
 | 2025-09-30 | putte | Updated backlog for BUG-001 completion | done | Moved BUG-001 to Done section; was resolved alongside BUG-002/BUG-003 on 2025-09-27 with comprehensive NaN handling |
