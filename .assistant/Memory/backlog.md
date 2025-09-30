@@ -22,6 +22,7 @@
 | SDK-010A | Matomo error diagnostics | SDK `runDiagnostics` helper + `/tools/diagnose-matomo` Opal endpoint |
 | SDK-010B | Enhanced API error handling | Classified Matomo errors with guidance-rich `MatomoApiError` subclasses |
 | SDK-010C | Service health monitoring | Added `getHealthStatus()` method with proactive health checks for Matomo/externals and `/tools/get-health-status` endpoint |
+| SDK-010E | Rate limit awareness | Track Matomo rate limit headers, surface warnings, and document health guidance |
 | BUG-002 | Key numbers scalar parsing | Coerce scalar Matomo responses into key-number objects to avoid Zod failures |
 | BUG-003 | Key numbers array parsing | Ensure array-wrapped Matomo responses (single & series) are unwrapped before Zod validation |
 | BUG-001 | Handle NaN key metrics | `getKeyNumbers` NaN handling implemented alongside BUG-002/BUG-003 with `toFiniteNumber()` guards and series fallbacks |
@@ -30,7 +31,6 @@
 | ID | Title | Notes |
 |----|-------|-------|
 | SDK-010D | Contextual error guidance | Map common Matomo errors to actionable remediation tips within responses |
-| SDK-010E | Rate limit awareness | Detect API quota limits, throttle requests, and inform users when limits are hit |
 | SDK-010F | Idempotent request support | Ensure repeatable write operations avoid duplicate effects during retries |
 | INF-004 | Structured logging | Replace console with Pino/Winston in production and restrict stdout to warn/error levels |
 | SDK-011 | Analyze historical key numbers | Derive peak values across key metrics from GetKeyNumbersHistorical data and present results |

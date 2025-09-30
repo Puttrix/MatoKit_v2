@@ -46,6 +46,15 @@ Returns real-time health status with individual component checks.
       "observedUnit": "pending",
       "time": "2025-09-30T15:30:00.000Z",
       "output": "Queue processing normally"
+    },
+    {
+      "name": "rate-limit",
+      "status": "warn",
+      "componentType": "service",
+      "observedValue": 4,
+      "observedUnit": "requests",
+      "time": "2025-09-30T15:30:00.000Z",
+      "output": "Limit 120 • Remaining 4 • Resets at 2025-09-30T15:35:00.000Z"
     }
   ]
 }
@@ -68,12 +77,20 @@ Returns real-time health status with individual component checks.
   - `warn`: Hit rate 5-20% (with sufficient requests)
   - `fail`: Hit rate < 5% (with sufficient requests)
 
-### 3. Tracking Queue Status
+### 3. Rate Limit Capacity
+- **Check**: Evaluates remaining Matomo API allowance from response headers
+- **Metrics**: Remaining requests, reset timestamp/seconds, retry-after hints
+- **Status**:
+  - `pass`: Remaining > 10% of limit
+  - `warn`: Remaining ≤10% or headers missing
+  - `fail`: Remaining exhausted (0)
+
+### 4. Tracking Queue Status
 - **Check**: Monitors tracking queue health
 - **Metrics**: Pending operations count
 - **Status**: `pass` when queue is processing normally
 
-### 4. Site Access (Optional)
+### 5. Site Access (Optional)
 - **Check**: Verifies access to specific Matomo site (when `includeDetails=true`)
 - **Requirement**: Requires valid `siteId` (from parameter or default)
 - **Status**:

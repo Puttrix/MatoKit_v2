@@ -475,6 +475,15 @@ curl -X POST http://localhost:3000/tools/get-health-status \
       "observedUnit": "pending",
       "time": "2025-09-30T15:30:00.000Z",
       "output": "Queue processing normally"
+    },
+    {
+      "name": "rate-limit",
+      "status": "pass",
+      "componentType": "service",
+      "observedValue": 90,
+      "observedUnit": "requests",
+      "time": "2025-09-30T15:30:00.000Z",
+      "output": "Limit 120 • Remaining 90 • Resets at 2025-09-30T15:35:00.000Z"
     }
   ]
 }
@@ -522,6 +531,15 @@ curl -X POST http://localhost:3000/tools/get-health-status \
       "output": "Queue processing normally"
     },
     {
+      "name": "rate-limit",
+      "status": "pass",
+      "componentType": "service",
+      "observedValue": 90,
+      "observedUnit": "requests",
+      "time": "2025-09-30T15:30:00.000Z",
+      "output": "Limit 120 • Remaining 90 • Resets at 2025-09-30T15:35:00.000Z"
+    },
+    {
       "name": "site-access",
       "status": "pass",
       "componentType": "service",
@@ -564,6 +582,15 @@ curl -X POST http://localhost:3000/tools/get-health-status \
       "observedUnit": "pending",
       "time": "2025-09-30T15:30:00.000Z",
       "output": "Queue processing normally"
+    },
+    {
+      "name": "rate-limit",
+      "status": "warn",
+      "componentType": "service",
+      "observedValue": 4,
+      "observedUnit": "requests",
+      "time": "2025-09-30T15:30:00.000Z",
+      "output": "Limit 120 • Remaining 4 • Resets at 2025-09-30T15:35:00.000Z"
     }
   ]
 }
