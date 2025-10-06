@@ -90,6 +90,37 @@ Containerized deployments that cannot mount an additional config volume can inli
 `MATOKIT_SITE_INDEX_JSON`. Provide the JSON string exactly as it appears in `deploy/site-index.example.json` (quotes included)
 and the service will parse and normalize it before wiring the index into the SDK.
 
+### Portainer stack example (mounted JSON file)
+
+Portainer stacks can mount the JSON definition as a Docker config so you do not have to bake credentials into the stack
+compose file:
+
+1. In the Portainer UI, open **Configs → Add Config**, name it `matokit-site-index`, and paste the contents of your site index
+   JSON (see `deploy/site-index.example.json`).
+2. Edit your stack and reference the config plus the expected on-disk path:
+
+   ```yaml
+   services:
+     matokit:
+       environment:
+         MATOKIT_SITE_INDEX_PATH: /run/configs/matokit-site-index.json
+       configs:
+         - source: matokit-site-index
+           target: /run/configs/matokit-site-index.json
+           mode: 0440
+
+   configs:
+     matokit-site-index:
+       external: true
+   ```
+
+   Docker makes the config available at `/run/configs/<name>`; the service reads the file on startup, validates the schema, and
+   publishes the index to the SDK.
+3. Apply or redeploy the stack. The API container will load the mounted JSON and use it for site routing.
+
+If you would rather keep everything in the stack definition, Portainer also supports pasting `MATOKIT_SITE_INDEX_JSON` directly
+under **Environment variables** when deploying or editing the stack.
+
 If you prefer to manage the index as a file—either because the JSON is large or you are storing it with your infrastructure
 configuration—set `MATOKIT_SITE_INDEX_PATH` to the location of the JSON document. The site index provides a single source of truth
 for site names, API credentials, and tracking overrides so assistants can route requests to the correct Matomo context.
