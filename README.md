@@ -49,9 +49,10 @@ This project provides a lightweight SDK and Express-based tool service that make
 MATOMO_BASE_URL=https://matomo.example.com
 MATOMO_TOKEN=your-matomo-token
 MATOMO_DEFAULT_SITE_ID=1
+MATOKIT_SITE_INDEX_PATH=/etc/matomo/site-index.json
 OPAL_BEARER_TOKEN=<generate-with-openssl-rand-hex-32>
 PORT=4000
-   ```
+  ```
 
 3. **Build packages**
    ```bash
@@ -70,8 +71,31 @@ PORT=4000
 | `MATOMO_BASE_URL` | Base URL to your Matomo instance (should include host, optional path). |
 | `MATOMO_TOKEN` | Matomo `token_auth` used for Reporting API calls. |
 | `MATOMO_DEFAULT_SITE_ID` | Default `idSite` used when tool requests omit `siteId`. |
+| `MATOMO_SITE_MAP` | Comma-separated `<siteId>:<name>` pairs for Matomo sites that share the same base URL/token. |
+| `MATOKIT_SITE_INDEX_PATH` | Absolute or relative path to the deployment's site index JSON file. |
 | `OPAL_BEARER_TOKEN` | Bearer token required on `/tools/*` endpoints (generate securely, e.g., `openssl rand -hex 32`). |
 | `PORT` | Listener port for the API service (default `4000`). |
+
+## Multi-site configuration
+
+For Matomo instances that host multiple sites on the same base URL and token, define `MATOMO_SITE_MAP` as a comma-separated list
+of `<siteId>:<name>` pairs (for example, `MATOMO_SITE_MAP=1:Marketing,2:Docs`). The API service reads this variable at startup
+and publishes the site catalog to assistants so they can route requests with friendly names.
+
+If you need per-site overrides (different tokens, tracking collectors, metadata, etc.), set `MATOKIT_SITE_INDEX_PATH` to a JSON
+document that lists every Matomo site your deployment needs to serve. The site index provides a single source of truth for site
+names, API credentials, and tracking overrides so assistants can route requests to the correct Matomo context.
+
+1. Copy `deploy/site-index.example.json` to your secret store or configuration repository.
+2. Update each entry under `sites` with the Matomo `siteId`, a friendly `name`, and any overrides:
+   - `baseUrl` / `tokenAuth` override the Reporting API endpoint and token for that site.
+   - `tracking.baseUrl` / `tracking.tokenAuth` override the Matomo Tracking API endpoint and token.
+   - `url`, `description`, or `metadata` can capture deployment-specific context for operators.
+3. Set `defaultSiteId` to the site assistants should use when a request omits `siteId`.
+4. Point `MATOKIT_SITE_INDEX_PATH` at the file (the service accepts absolute or relative paths).
+
+The SDK also exports `loadSiteIndexFromEnv`, `loadSiteIndexFromFile`, and `normalizeSiteIndex` helpers for custom tooling should
+you need to inspect the index outside of the API service.
 
 ## Available Scripts
 From the repo root:

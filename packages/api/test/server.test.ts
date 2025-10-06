@@ -25,9 +25,13 @@ const mockMatomoClient = {
 };
 
 const createMatomoClientMock = vi.fn(() => mockMatomoClient);
+const loadSiteIndexFromFileMock = vi.fn();
+const loadSiteIndexFromEnvMock = vi.fn();
 
 vi.mock('@matokit/sdk', () => ({
   createMatomoClient: createMatomoClientMock,
+  loadSiteIndexFromEnv: loadSiteIndexFromEnvMock,
+  loadSiteIndexFromFile: loadSiteIndexFromFileMock,
 }));
 
 async function createApp(): Promise<Express> {
@@ -73,6 +77,9 @@ beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   createMatomoClientMock.mockImplementation(() => mockMatomoClient);
+  loadSiteIndexFromFileMock.mockReset();
+  loadSiteIndexFromFileMock.mockReturnValue({ defaultSiteId: 1, sites: new Map() });
+  loadSiteIndexFromEnvMock.mockReset();
   mockMatomoClient.getKeyNumbers.mockReset();
   mockMatomoClient.getKeyNumbersSeries.mockReset();
   mockMatomoClient.getMostPopularUrls.mockReset();
@@ -95,6 +102,8 @@ beforeEach(() => {
   process.env.MATOMO_TOKEN = 'token';
   process.env.MATOMO_DEFAULT_SITE_ID = '1';
   process.env.OPAL_BEARER_TOKEN = 'test-token';
+  delete process.env.MATOKIT_SITE_INDEX_PATH;
+  delete process.env.MATOMO_SITE_MAP;
 });
 
 afterEach(() => {
@@ -102,6 +111,8 @@ afterEach(() => {
   delete process.env.MATOMO_TOKEN;
   delete process.env.MATOMO_DEFAULT_SITE_ID;
   delete process.env.OPAL_BEARER_TOKEN;
+  delete process.env.MATOKIT_SITE_INDEX_PATH;
+  delete process.env.MATOMO_SITE_MAP;
 });
 
 describe('tool endpoints', () => {
@@ -137,6 +148,34 @@ describe('tool endpoints', () => {
       date: '2024-01-01',
       segment: 'country==SE',
     });
+  });
+
+  it('loads a site index when MATOKIT_SITE_INDEX_PATH is set', async () => {
+    const fakeIndex = { defaultSiteId: 3, sites: new Map() } as unknown;
+    loadSiteIndexFromFileMock.mockReturnValue(fakeIndex);
+    process.env.MATOKIT_SITE_INDEX_PATH = '/etc/matomo/site-index.json';
+
+    await createApp();
+
+    expect(loadSiteIndexFromEnvMock).not.toHaveBeenCalled();
+    expect(loadSiteIndexFromFileMock).toHaveBeenCalledWith('/etc/matomo/site-index.json');
+    expect(createMatomoClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ siteIndex: fakeIndex })
+    );
+  });
+
+  it('loads a site index from MATOMO_SITE_MAP when present', async () => {
+    const fakeIndex = { defaultSiteId: 4, sites: new Map([[4, { siteId: 4, name: 'Primary' }]]) } as unknown;
+    loadSiteIndexFromEnvMock.mockReturnValue(fakeIndex);
+    process.env.MATOMO_SITE_MAP = '4:Primary';
+
+    await createApp();
+
+    expect(loadSiteIndexFromEnvMock).toHaveBeenCalledWith('4:Primary', { defaultSiteId: 1 });
+    expect(loadSiteIndexFromFileMock).not.toHaveBeenCalled();
+    expect(createMatomoClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ siteIndex: fakeIndex })
+    );
   });
 
   it('returns historical key numbers with defaults', async () => {

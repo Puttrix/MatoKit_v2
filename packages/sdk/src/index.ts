@@ -39,6 +39,12 @@ import {
   type TrackingIdempotencyStore,
 } from './tracking.js';
 import { MatomoApiError, MatomoNetworkError } from './errors.js';
+import {
+  type MatomoSiteIndex,
+  type MatomoSiteIndexSource,
+  type MatomoSiteMetadata,
+  normalizeSiteIndex,
+} from './siteIndex.js';
 
 export interface CacheConfig {
   ttlMs?: number;
@@ -51,6 +57,7 @@ export interface MatomoClientConfig {
   defaultSiteId?: number;
   tracking?: {
     baseUrl?: string;
+    tokenAuth?: string;
     maxRetries?: number;
     retryDelayMs?: number;
     idempotencyStore?: TrackingIdempotencyStore;
@@ -58,6 +65,7 @@ export interface MatomoClientConfig {
   cacheTtlMs?: number;
   cache?: CacheConfig;
   rateLimit?: MatomoRateLimitOptions;
+  siteIndex?: MatomoSiteIndexSource;
 }
 
 export interface GetKeyNumbersInput {
@@ -347,41 +355,139 @@ function assertSiteId(siteId: number | undefined): asserts siteId is number {
   }
 }
 
+interface SiteContext {
+  http: MatomoHttpClient;
+  reports: ReportsService;
+  tracking: TrackingService;
+  metadata: MatomoSiteMetadata;
+}
+
 export class MatomoClient {
   private readonly http: MatomoHttpClient;
   private readonly reports: ReportsService;
   private readonly tracking: TrackingService;
   private readonly defaultSiteId?: number;
 
+  private readonly baseApiUrl: string;
+  private readonly baseTokenAuth: string;
+  private readonly baseTrackingBaseUrl: string;
+  private readonly baseTrackingTokenAuth: string;
+  private readonly reportsOptions: ReportsServiceOptions;
+  private readonly trackingOptions: {
+    maxRetries?: number;
+    retryDelayMs?: number;
+    idempotencyStore?: TrackingIdempotencyStore;
+  };
+  private readonly rateLimitOptions?: MatomoRateLimitOptions;
+  private readonly siteIndex?: MatomoSiteIndex;
+  private readonly siteContexts = new Map<number, SiteContext>();
+
   constructor(config: MatomoClientConfig) {
-    this.http = new MatomoHttpClient(config.baseUrl, config.tokenAuth, {
-      rateLimit: config.rateLimit,
-    });
-    const reportsOptions: ReportsServiceOptions = {
+    this.baseApiUrl = config.baseUrl;
+    this.baseTokenAuth = config.tokenAuth;
+    this.rateLimitOptions = config.rateLimit;
+
+    this.reportsOptions = {
       cacheTtlMs: config.cache?.ttlMs ?? config.cacheTtlMs,
       onCacheEvent: config.cache?.onEvent,
     };
-    this.reports = new ReportsService(this.http, reportsOptions);
-    this.tracking = new TrackingService({
-      baseUrl: config.tracking?.baseUrl ?? config.baseUrl,
-      tokenAuth: config.tokenAuth,
+
+    this.trackingOptions = {
       maxRetries: config.tracking?.maxRetries,
       retryDelayMs: config.tracking?.retryDelayMs,
       idempotencyStore: config.tracking?.idempotencyStore,
+    };
+
+    this.baseTrackingBaseUrl = config.tracking?.baseUrl ?? config.baseUrl;
+    this.baseTrackingTokenAuth = config.tracking?.tokenAuth ?? config.tokenAuth;
+
+    this.http = new MatomoHttpClient(this.baseApiUrl, this.baseTokenAuth, {
+      rateLimit: this.rateLimitOptions,
     });
-    this.defaultSiteId = config.defaultSiteId;
+
+    this.reports = new ReportsService(this.http, this.reportsOptions);
+    this.tracking = new TrackingService({
+      baseUrl: this.baseTrackingBaseUrl,
+      tokenAuth: this.baseTrackingTokenAuth,
+      maxRetries: this.trackingOptions.maxRetries,
+      retryDelayMs: this.trackingOptions.retryDelayMs,
+      idempotencyStore: this.trackingOptions.idempotencyStore,
+    });
+
+    this.siteIndex = config.siteIndex ? normalizeSiteIndex(config.siteIndex) : undefined;
+    this.defaultSiteId = this.siteIndex?.defaultSiteId ?? config.defaultSiteId;
+  }
+
+  private resolveSite(
+    override?: number
+  ): { siteId: number; http: MatomoHttpClient; reports: ReportsService; tracking: TrackingService; metadata?: MatomoSiteMetadata } {
+    const candidate = override ?? this.defaultSiteId;
+    assertSiteId(candidate);
+
+    if (!this.siteIndex) {
+      return {
+        siteId: candidate,
+        http: this.http,
+        reports: this.reports,
+        tracking: this.tracking,
+      };
+    }
+
+    const metadata = this.siteIndex.sites.get(candidate);
+    if (!metadata) {
+      throw new Error(`Unknown siteId ${candidate}`);
+    }
+
+    const baseUrl = metadata.baseUrl ?? this.baseApiUrl;
+    const tokenAuth = metadata.tokenAuth ?? this.baseTokenAuth;
+    const trackingBaseUrl = metadata.tracking?.baseUrl ?? metadata.baseUrl ?? this.baseTrackingBaseUrl;
+    const trackingTokenAuth = metadata.tracking?.tokenAuth ?? metadata.tokenAuth ?? this.baseTrackingTokenAuth;
+
+    const matchesDefaultHttp = baseUrl === this.baseApiUrl && tokenAuth === this.baseTokenAuth;
+    const matchesDefaultTracking =
+      trackingBaseUrl === this.baseTrackingBaseUrl && trackingTokenAuth === this.baseTrackingTokenAuth;
+
+    if (matchesDefaultHttp && matchesDefaultTracking) {
+      return { siteId: candidate, http: this.http, reports: this.reports, tracking: this.tracking, metadata };
+    }
+
+    let context = this.siteContexts.get(candidate);
+    if (!context) {
+      const http = matchesDefaultHttp
+        ? this.http
+        : new MatomoHttpClient(baseUrl, tokenAuth, { rateLimit: this.rateLimitOptions });
+
+      const reports = matchesDefaultHttp ? this.reports : new ReportsService(http, this.reportsOptions);
+
+      const tracking = matchesDefaultTracking
+        ? this.tracking
+        : new TrackingService({
+            baseUrl: trackingBaseUrl,
+            tokenAuth: trackingTokenAuth,
+            maxRetries: this.trackingOptions.maxRetries,
+            retryDelayMs: this.trackingOptions.retryDelayMs,
+            idempotencyStore: this.trackingOptions.idempotencyStore,
+          });
+
+      context = { http, reports, tracking, metadata };
+      this.siteContexts.set(candidate, context);
+    } else if (!context.metadata && metadata) {
+      // Ensure metadata is stored for contexts created before the index was hydrated.
+      this.siteContexts.set(candidate, { ...context, metadata });
+      context = this.siteContexts.get(candidate)!;
+    }
+
+    return { siteId: candidate, ...context };
   }
 
   private resolveSiteId(override?: number) {
-    const value = override ?? this.defaultSiteId;
-    assertSiteId(value);
-    return value;
+    return this.resolveSite(override).siteId;
   }
 
   async getKeyNumbers(input: GetKeyNumbersInput = {}): Promise<KeyNumbers> {
-    const siteId = this.resolveSiteId(input.siteId);
+    const { siteId, http } = this.resolveSite(input.siteId);
 
-    const raw = await matomoGet<unknown>(this.http, {
+    const raw = await matomoGet<unknown>(http, {
       method: 'VisitsSummary.get',
       params: {
         idSite: siteId,
@@ -396,7 +502,7 @@ export class MatomoClient {
     let pageviewSummary: Partial<Pick<KeyNumbers, 'nb_pageviews' | 'nb_uniq_pageviews'>> = {};
 
     try {
-      const actionsRaw = await matomoGet<unknown>(this.http, {
+      const actionsRaw = await matomoGet<unknown>(http, {
         method: 'Actions.get',
         params: {
           idSite: siteId,
@@ -451,11 +557,11 @@ export class MatomoClient {
   }
 
   async getKeyNumbersSeries(input: GetKeyNumbersSeriesInput = {}): Promise<KeyNumbersSeriesPoint[]> {
-    const siteId = this.resolveSiteId(input.siteId);
+    const { siteId, http } = this.resolveSite(input.siteId);
     const period = input.period ?? 'day';
     const date = input.date ?? 'last7';
 
-    const response = await matomoGet<Record<string, unknown>>(this.http, {
+    const response = await matomoGet<Record<string, unknown>>(http, {
       method: 'VisitsSummary.get',
       params: {
         idSite: siteId,
@@ -488,20 +594,20 @@ export class MatomoClient {
   async getMostPopularUrls(
     input: Omit<Parameters<ReportsService['getMostPopularUrls']>[0], 'siteId'> & { siteId?: number }
   ): Promise<MostPopularUrl[]> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getMostPopularUrls({ ...input, siteId });
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getMostPopularUrls({ ...input, siteId });
   }
 
   async getTopReferrers(
     input: Omit<Parameters<ReportsService['getTopReferrers']>[0], 'siteId'> & { siteId?: number }
   ): Promise<TopReferrer[]> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getTopReferrers({ ...input, siteId });
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getTopReferrers({ ...input, siteId });
   }
 
   async getEvents(input: GetEventsInput = {}): Promise<EventSummary[]> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getEvents({
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getEvents({
       siteId,
       period: input.period ?? 'day',
       date: input.date ?? 'today',
@@ -514,8 +620,8 @@ export class MatomoClient {
   }
 
   async getEntryPages(input: GetEntryPagesInput = {}): Promise<EntryPage[]> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getEntryPages({
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getEntryPages({
       siteId,
       period: input.period ?? 'day',
       date: input.date ?? 'today',
@@ -525,8 +631,8 @@ export class MatomoClient {
   }
 
   async getCampaigns(input: GetCampaignsInput = {}): Promise<Campaign[]> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getCampaigns({
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getCampaigns({
       siteId,
       period: input.period ?? 'day',
       date: input.date ?? 'today',
@@ -536,8 +642,8 @@ export class MatomoClient {
   }
 
   async getEcommerceOverview(input: GetEcommerceOverviewInput = {}): Promise<EcommerceSummary> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getEcommerceOverview({
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getEcommerceOverview({
       siteId,
       period: input.period ?? 'day',
       date: input.date ?? 'today',
@@ -548,8 +654,8 @@ export class MatomoClient {
   async getEcommerceRevenueTotals(
     input: GetEcommerceRevenueTotalsInput = {}
   ): Promise<EcommerceRevenueTotals> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getEcommerceRevenueTotals({
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getEcommerceRevenueTotals({
       siteId,
       period: input.period ?? 'day',
       date: input.date ?? 'today',
@@ -559,8 +665,8 @@ export class MatomoClient {
   }
 
   async getEventCategories(input: GetEventCategoriesInput = {}): Promise<EventCategory[]> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getEventCategories({
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getEventCategories({
       siteId,
       period: input.period ?? 'day',
       date: input.date ?? 'today',
@@ -570,8 +676,8 @@ export class MatomoClient {
   }
 
   async getDeviceTypes(input: GetDeviceTypesInput = {}): Promise<DeviceTypeSummary[]> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getDeviceTypes({
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getDeviceTypes({
       siteId,
       period: input.period ?? 'day',
       date: input.date ?? 'today',
@@ -581,8 +687,8 @@ export class MatomoClient {
   }
 
   async getTrafficChannels(input: GetTrafficChannelsInput = {}): Promise<TrafficChannel[]> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getTrafficChannels({
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getTrafficChannels({
       siteId,
       period: input.period ?? 'day',
       date: input.date ?? 'today',
@@ -593,8 +699,8 @@ export class MatomoClient {
   }
 
   async getGoalConversions(input: GetGoalConversionsInput = {}): Promise<GoalConversion[]> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.reports.getGoalConversions({
+    const { siteId, reports } = this.resolveSite(input.siteId);
+    return reports.getGoalConversions({
       siteId,
       period: input.period ?? 'day',
       date: input.date ?? 'today',
@@ -605,44 +711,73 @@ export class MatomoClient {
     });
   }
 
-  getCacheStats(): CacheStatsSnapshot {
-    return this.reports.getCacheStats();
+  getCacheStats(siteId?: number): CacheStatsSnapshot {
+    if (siteId === undefined || !this.siteIndex) {
+      return this.reports.getCacheStats();
+    }
+
+    const { reports } = this.resolveSite(siteId);
+    return reports.getCacheStats();
   }
 
-  getLastRateLimitEvent(): MatomoRateLimitEvent | undefined {
-    return this.http.getLastRateLimitEvent();
+  getLastRateLimitEvent(siteId?: number): MatomoRateLimitEvent | undefined {
+    if (siteId === undefined || !this.siteIndex) {
+      return this.http.getLastRateLimitEvent();
+    }
+
+    const { http } = this.resolveSite(siteId);
+    return http.getLastRateLimitEvent();
   }
 
   async trackPageview(
     input: Omit<TrackPageviewInput, 'siteId'> & { siteId?: number }
   ): Promise<TrackPageviewResult> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.tracking.trackPageview({ ...input, siteId });
+    const { siteId, tracking } = this.resolveSite(input.siteId);
+    return tracking.trackPageview({ ...input, siteId });
   }
 
   async trackEvent(
     input: Omit<TrackEventInput, 'siteId'> & { siteId?: number }
   ): Promise<TrackResult> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.tracking.trackEvent({ ...input, siteId });
+    const { siteId, tracking } = this.resolveSite(input.siteId);
+    return tracking.trackEvent({ ...input, siteId });
   }
 
   async trackGoal(
     input: Omit<TrackGoalInput, 'siteId'> & { siteId?: number }
   ): Promise<TrackResult> {
-    const siteId = this.resolveSiteId(input.siteId);
-    return this.tracking.trackGoal({ ...input, siteId });
+    const { siteId, tracking } = this.resolveSite(input.siteId);
+    return tracking.trackGoal({ ...input, siteId });
   }
 
-  async getTrackingRequestMetadata(key: string): Promise<TrackingIdempotencyRecord | undefined> {
-    return this.tracking.getIdempotencyRecord(key);
+  async getTrackingRequestMetadata(
+    key: string,
+    siteId?: number
+  ): Promise<TrackingIdempotencyRecord | undefined> {
+    if (siteId === undefined || !this.siteIndex) {
+      return this.tracking.getIdempotencyRecord(key);
+    }
+
+    const { tracking } = this.resolveSite(siteId);
+    return tracking.getIdempotencyRecord(key);
   }
 
   async runDiagnostics(input: RunDiagnosticsInput = {}): Promise<RunDiagnosticsResult> {
     const checks: MatomoDiagnosticCheck[] = [];
 
+    let context: ReturnType<typeof this.resolveSite> | undefined;
+    let siteIdError: MatomoDiagnosticError | undefined;
+    let httpForDiagnostics: MatomoHttpClient = this.http;
+
+    try {
+      context = this.resolveSite(input.siteId);
+      httpForDiagnostics = context.http;
+    } catch (error) {
+      siteIdError = toDiagnosticError(error);
+    }
+
     const baseCheck = await performDiagnosticCheck('base-url', 'Matomo base URL reachability', async () => {
-      const payload = await matomoGet<unknown>(this.http, {
+      const payload = await matomoGet<unknown>(httpForDiagnostics, {
         method: 'API.getVersion',
       });
 
@@ -680,7 +815,7 @@ export class MatomoClient {
     }
 
     const tokenCheck = await performDiagnosticCheck('token-auth', 'Token authentication', async () => {
-      const payload = await matomoGet<unknown>(this.http, {
+      const payload = await matomoGet<unknown>(httpForDiagnostics, {
         method: 'API.getLoggedInUser',
       });
 
@@ -707,15 +842,6 @@ export class MatomoClient {
       return { checks };
     }
 
-    let resolvedSiteId: number | undefined;
-    let siteIdError: MatomoDiagnosticError | undefined;
-
-    try {
-      resolvedSiteId = this.resolveSiteId(input.siteId);
-    } catch (error) {
-      siteIdError = toDiagnosticError(error);
-    }
-
     if (siteIdError) {
       checks.push({
         id: 'site-access',
@@ -727,10 +853,11 @@ export class MatomoClient {
       return { checks };
     }
 
-    const siteIdForCheck = resolvedSiteId as number;
+    const resolvedContext = context ?? this.resolveSite();
+    const siteIdForCheck = resolvedContext.siteId;
 
     const siteCheck = await performDiagnosticCheck('site-access', 'Site access permissions', async () => {
-      const payload = await matomoGet<unknown>(this.http, {
+      const payload = await matomoGet<unknown>(resolvedContext.http, {
         method: 'SitesManager.getSiteFromId',
         params: { idSite: siteIdForCheck },
       });
@@ -759,6 +886,7 @@ export class MatomoClient {
   async getHealthStatus(input: GetHealthStatusInput = {}): Promise<HealthCheckStatus> {
     const timestamp = new Date().toISOString();
     const checks: HealthCheck[] = [];
+    const context = this.resolveSite(input.siteId);
 
     // Matomo API connectivity check
     let matomoStatus: 'pass' | 'fail' = 'pass';
@@ -767,7 +895,7 @@ export class MatomoClient {
 
     try {
       const startTime = Date.now();
-      await matomoGet<unknown>(this.http, {
+      await matomoGet<unknown>(context.http, {
         method: 'API.getVersion',
       });
       responseTime = Date.now() - startTime;
@@ -788,7 +916,7 @@ export class MatomoClient {
     });
 
     // Cache health check
-    const cacheStats = this.getCacheStats();
+    const cacheStats = this.getCacheStats(context.siteId);
     const totalRequests = cacheStats.total.hits + cacheStats.total.misses;
     const hitRate = totalRequests > 0 ? (cacheStats.total.hits / totalRequests) * 100 : 0;
     
@@ -826,8 +954,8 @@ export class MatomoClient {
       let siteOutput = '';
 
       try {
-        const siteId = this.resolveSiteId(input.siteId);
-        await matomoGet<unknown>(this.http, {
+        const siteId = context.siteId;
+        await matomoGet<unknown>(context.http, {
           method: 'SitesManager.getSiteFromId',
           params: { idSite: siteId },
         });
@@ -899,6 +1027,23 @@ export type {
 };
 
 export type { MatomoRateLimitOptions } from './httpClient.js';
+
+export {
+  loadSiteIndexFromFile,
+  loadSiteIndexFromEnv,
+  normalizeSiteIndex,
+  getSiteMetadata,
+} from './siteIndex.js';
+
+export type {
+  MatomoSiteDefinition,
+  MatomoSiteIndex,
+  MatomoSiteIndexDefinition,
+  MatomoSiteIndexSource,
+  MatomoSiteMetadata,
+  MatomoSiteTrackingConfig,
+  LoadSiteIndexFromEnvOptions,
+} from './siteIndex.js';
 
 export { TrackingService } from './tracking.js';
 export {

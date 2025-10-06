@@ -92,6 +92,75 @@ describe('MatomoClient', () => {
     expect(result.nb_pageviews).toBe(0);
   });
 
+  it('uses site index overrides for API calls', async () => {
+    const fetchMock = createSequencedFetchMock([
+      { nb_visits: 7 },
+      { nb_pageviews: 15, nb_uniq_pageviews: 14 },
+    ]);
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = createMatomoClient({
+      baseUrl,
+      tokenAuth: token,
+      siteIndex: {
+        defaultSiteId: 7,
+        sites: {
+          '7': { name: 'Primary', baseUrl, tokenAuth: token },
+          '9': {
+            name: 'Secondary',
+            baseUrl: 'https://matomo.secondary.example.com',
+            tokenAuth: 'secondary-token',
+          },
+        },
+      },
+    });
+
+    await client.getKeyNumbers({ siteId: 9 });
+
+    const requestUrl = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(requestUrl.origin + requestUrl.pathname).toBe('https://matomo.secondary.example.com/index.php');
+    expect(requestUrl.searchParams.get('idSite')).toBe('9');
+    expect(requestUrl.searchParams.get('token_auth')).toBe('secondary-token');
+  });
+
+  it('falls back to index default site when config default is omitted', async () => {
+    const fetchMock = createSequencedFetchMock([{ nb_visits: 3 }, { nb_pageviews: 8 }]);
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = createMatomoClient({
+      baseUrl,
+      tokenAuth: token,
+      siteIndex: {
+        defaultSiteId: 4,
+        sites: {
+          '4': { name: 'Marketing Site' },
+        },
+      },
+    });
+
+    await client.getKeyNumbers();
+
+    const requestUrl = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(requestUrl.searchParams.get('idSite')).toBe('4');
+  });
+
+  it('throws when siteId is missing from the site index', async () => {
+    const client = createMatomoClient({
+      baseUrl,
+      tokenAuth: token,
+      siteIndex: {
+        defaultSiteId: 2,
+        sites: {
+          '2': { name: 'Main Site' },
+        },
+      },
+    });
+
+    await expect(client.getKeyNumbers({ siteId: 99 })).rejects.toThrow('Unknown siteId 99');
+  });
+
   it('unwraps array key number payloads returned by Matomo', async () => {
     const fetchMock = createSequencedFetchMock([
       [{ nb_visits: 5, nb_actions: '10' }],
@@ -659,6 +728,49 @@ describe('MatomoClient', () => {
     const body = (init?.body as URLSearchParams).toString();
     expect(body).toContain('idsite=11');
     expect(body).toContain('e_c=cta');
+  });
+
+  it('uses site index overrides for tracking calls', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      statusText: 'No Content',
+      text: async () => '',
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = createMatomoClient({
+      baseUrl,
+      tokenAuth: token,
+      siteIndex: {
+        defaultSiteId: 5,
+        sites: {
+          '5': {
+            name: 'Primary',
+            tracking: {
+              baseUrl: 'https://collector.primary.example.com/matomo.php',
+              tokenAuth: 'primary-track',
+            },
+          },
+          '12': {
+            name: 'Secondary',
+            tracking: {
+              baseUrl: 'https://collector.secondary.example.com/matomo.php',
+              tokenAuth: 'secondary-track',
+            },
+          },
+        },
+      },
+    });
+
+    await client.trackEvent({ siteId: 12, category: 'cta', action: 'click' });
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe('https://collector.secondary.example.com/matomo.php');
+    const body = (init?.body as URLSearchParams).toString();
+    expect(body).toContain('token_auth=secondary-track');
+    expect(body).toContain('idsite=12');
   });
 
   describe('getHealthStatus', () => {

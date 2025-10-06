@@ -1,0 +1,25 @@
+{
+  "defaultSiteId": 1,
+  "sites": {
+    "1": {
+      "name": "Marketing Site",
+      "url": "https://www.example.com",
+      "baseUrl": "https://matomo.example.com",
+      "tokenAuth": "token_for_site_1",
+      "tracking": {
+        "baseUrl": "https://matomo.example.com/matomo.php",
+        "tokenAuth": "token_for_site_1"
+      },
+      "metadata": {
+        "owner": "marketing",
+        "notes": "Primary production site"
+      }
+    },
+    "2": {
+      "name": "Documentation",
+      "url": "https://docs.example.com",
+      "baseUrl": "https://matomo.example.com",
+      "tokenAuth": "token_for_site_2"
+    }
+  }
+}
