@@ -100,9 +100,22 @@ MATOKIT_SITE_2_NAME=Partner Portal
 
 When the registry is configured:
 
-- Tools accept numeric IDs (`7`), keys (`partner`), or names (`Partner Portal`) for the `siteId` parameter.
+- Tools accept numeric IDs (for example `7`) or names (for example `"Partner Portal"`) for the `siteId` parameter. The numbered
+  indexes are internal and do not need to be exposed to callers.
 - Unknown selectors return an HTTP 400 response with guidance.
-- Container start-up fails fast if required pairs are missing, duplicates exist, or the default site is not part of the registry.
+- Container start-up fails fast if required pairs are missing, indexes are skipped, duplicates exist, or the default site is not
+  part of the registry.
+
+#### Migrating from legacy keyed variables
+
+Older deployments may still define descriptive variables such as `MATOKIT_SITE_MAIN_ID`/`MATOKIT_SITE_MAIN_NAME`. To migrate
+without downtime:
+
+1. Add the numbered replacements (`MATOKIT_SITE_0_ID`/`MATOKIT_SITE_0_NAME`, etc.) to your environment alongside the legacy
+   keys, ensuring the numbered catalog is sequential and includes the current default site ID.
+2. Deploy or restart the container so it reads the numbered configuration. The API ignores legacy keys once numbered entries
+   are available.
+3. Remove the deprecated keyed variables during your next configuration rotation to avoid confusion.
 
 ## Available Scripts
 From the repo root:

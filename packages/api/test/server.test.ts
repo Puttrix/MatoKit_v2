@@ -123,10 +123,10 @@ afterEach(() => {
 
 describe('site configuration', () => {
   it('configures a site resolver when MATOKIT_SITE variables are set', async () => {
-    process.env.MATOKIT_SITE_MAIN_ID = '3';
-    process.env.MATOKIT_SITE_MAIN_NAME = 'Main Site';
-    process.env.MATOKIT_SITE_BLOG_ID = '4';
-    process.env.MATOKIT_SITE_BLOG_NAME = 'Blog';
+    process.env.MATOKIT_SITE_0_ID = '3';
+    process.env.MATOKIT_SITE_0_NAME = 'Main Site';
+    process.env.MATOKIT_SITE_1_ID = '4';
+    process.env.MATOKIT_SITE_1_NAME = 'Blog';
     process.env.MATOMO_DEFAULT_SITE_ID = '3';
 
     await createApp();
@@ -137,13 +137,14 @@ describe('site configuration', () => {
     expect(typeof config?.siteResolver).toBe('function');
 
     const resolver = config?.siteResolver as (selector?: unknown) => unknown;
-    expect(resolver(undefined)).toEqual({ id: 3, key: 'MAIN', name: 'Main Site' });
-    expect(resolver('blog')).toEqual({ id: 4, key: 'BLOG', name: 'Blog' });
+    expect(resolver(undefined)).toEqual({ id: 3, name: 'Main Site' });
+    expect(resolver('Blog')).toEqual({ id: 4, name: 'Blog' });
+    expect(resolver('4')).toEqual({ id: 4, name: 'Blog' });
   });
 
-  it('passes string site identifiers to the Matomo client', async () => {
-    process.env.MATOKIT_SITE_MAIN_ID = '3';
-    process.env.MATOKIT_SITE_MAIN_NAME = 'Main Site';
+  it('resolves named site identifiers before invoking the Matomo client', async () => {
+    process.env.MATOKIT_SITE_0_ID = '3';
+    process.env.MATOKIT_SITE_0_NAME = 'Main Site';
     process.env.MATOMO_DEFAULT_SITE_ID = '3';
 
     const app = await createApp();
@@ -152,11 +153,11 @@ describe('site configuration', () => {
     await invoke(app, {
       url: '/tools/get-key-numbers',
       headers: { authorization: 'Bearer test-token' },
-      body: { parameters: { siteId: 'main' } },
+      body: { parameters: { siteId: 'Main Site' } },
     });
 
     expect(mockMatomoClient.getKeyNumbers).toHaveBeenCalledWith({
-      siteId: 'main',
+      siteId: 3,
       period: undefined,
       date: undefined,
       segment: undefined,
@@ -278,7 +279,7 @@ describe('tool endpoints', () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual(diagnostics);
-    expect(mockMatomoClient.runDiagnostics).toHaveBeenCalledWith({ siteId: '7' });
+    expect(mockMatomoClient.runDiagnostics).toHaveBeenCalledWith({ siteId: 7 });
   });
 
   it('forwards referrer requests with defaults when omitted', async () => {

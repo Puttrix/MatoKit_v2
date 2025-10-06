@@ -7,7 +7,7 @@ import express from 'express';
 import { Parameter, ParameterType, ToolsService } from '@optimizely-opal/opal-tools-sdk';
 import { createMatomoClient, MatomoSiteConfigurationError } from '@matokit/sdk';
 
-import { buildSiteRegistry } from './siteRegistry.js';
+import { buildSiteRegistry, type SiteRegistry } from './siteRegistry.js';
 
 function parseOptionalNumber(value: unknown): number | undefined {
   if (value === undefined || value === null || value === '') {
@@ -61,6 +61,43 @@ function requireString(value: unknown, field: string): string {
   return parsed;
 }
 
+function createRequestSiteResolver(registry: SiteRegistry) {
+  return (selector: number | string | undefined): number | string | undefined => {
+    if (selector === undefined || selector === null) {
+      return undefined;
+    }
+
+    if (typeof selector === 'number') {
+      return Number.isNaN(selector) ? undefined : selector;
+    }
+
+    const trimmed = selector.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    if (/^-?\d+$/.test(trimmed)) {
+      const numeric = Number.parseInt(trimmed, 10);
+      return Number.isNaN(numeric) ? undefined : numeric;
+    }
+
+    if (!registry.resolver) {
+      return trimmed;
+    }
+
+    const resolved = registry.resolver(trimmed);
+
+    if (!resolved || typeof resolved.id !== 'number' || Number.isNaN(resolved.id)) {
+      throw new MatomoSiteConfigurationError(
+        'Matomo site resolver returned an invalid site identifier.',
+        trimmed
+      );
+    }
+
+    return resolved.id;
+  };
+}
+
 export function buildServer() {
   const app = express();
   app.use(express.json());
@@ -86,6 +123,7 @@ export function buildServer() {
   });
 
   const siteRegistry = buildSiteRegistry(process.env);
+  const resolveSiteSelector = createRequestSiteResolver(siteRegistry);
 
   const matomoClient = createMatomoClient({
     baseUrl: process.env.MATOMO_BASE_URL || 'https://matomo.surputte.se',
@@ -147,7 +185,8 @@ export function buildServer() {
     'GetKeyNumbers',
     'Returns Matomo key metrics for the selected period and date.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -165,7 +204,8 @@ export function buildServer() {
     'DiagnoseMatomo',
     'Runs connectivity and permission checks against the configured Matomo instance.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       return matomoClient.runDiagnostics({ siteId });
     },
     [siteIdParam],
@@ -178,7 +218,8 @@ export function buildServer() {
     'GetHealthStatus',
     'Returns comprehensive health status for Matomo API, cache, and dependencies.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const includeDetails = Boolean(parameters?.['includeDetails']);
       return matomoClient.getHealthStatus({ siteId, includeDetails });
     },
@@ -190,7 +231,8 @@ export function buildServer() {
     'GetKeyNumbersHistorical',
     'Returns key metrics broken down per period for multi-day comparisons.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -213,7 +255,8 @@ export function buildServer() {
     'GetMostPopularUrls',
     'Retrieves the most visited pages for the selected period and date.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -232,7 +275,8 @@ export function buildServer() {
     'GetTopReferrers',
     'Lists the top referrers driving traffic for the selected period.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -251,7 +295,8 @@ export function buildServer() {
     'GetEntryPages',
     'Returns the most common entry pages for the selected time range.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -276,7 +321,8 @@ export function buildServer() {
     'GetCampaigns',
     'Lists campaign-level referrer metrics.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -301,7 +347,8 @@ export function buildServer() {
     'GetEcommerceOverview',
     'Returns ecommerce order revenue and conversion metrics for the selected period.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -324,7 +371,8 @@ export function buildServer() {
     'GetEcommerceRevenue',
     'Aggregates ecommerce revenue totals with optional per-period breakdown.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -355,7 +403,8 @@ export function buildServer() {
     'GetTrafficChannels',
     'Provides a high-level breakdown of traffic sources (direct, search, social, referrals, campaigns).',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -382,7 +431,8 @@ export function buildServer() {
     'GetGoalConversions',
     'Returns goal conversion metrics with optional filtering by goal or type.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -415,7 +465,8 @@ export function buildServer() {
     'GetEvents',
     'Returns aggregate event metrics optionally filtered by category, action, or name.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -446,7 +497,8 @@ export function buildServer() {
     'GetEventCategories',
     'Summarizes events grouped by category with aggregate counts and values.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -471,7 +523,8 @@ export function buildServer() {
     'GetDeviceTypes',
     'Breaks down visits by high-level device categories (desktop, mobile, tablet).',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const periodValue = parameters?.['period'];
       const dateValue = parameters?.['date'];
       const segmentValue = parameters?.['segment'];
@@ -496,7 +549,8 @@ export function buildServer() {
     'TrackPageview',
     'Records a server-side pageview with optional pv_id continuity.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const url = requireString(parameters?.['url'], 'url');
       const actionName = parseOptionalString(parameters?.['actionName']);
       const pvId = parseOptionalString(parameters?.['pvId']);
@@ -535,7 +589,8 @@ export function buildServer() {
     'TrackEvent',
     'Records a Matomo custom event.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const category = requireString(parameters?.['category'], 'category');
       const action = requireString(parameters?.['action'], 'action');
       const name = parseOptionalString(parameters?.['name']);
@@ -580,7 +635,8 @@ export function buildServer() {
     'TrackGoal',
     'Records a goal conversion.',
     async (parameters: Record<string, unknown>) => {
-      const siteId = parseSiteSelector(parameters?.['siteId']);
+      const siteSelector = parseSiteSelector(parameters?.['siteId']);
+      const siteId = resolveSiteSelector(siteSelector);
       const goalId = parseRequiredNumber(parameters?.['goalId'], 'goalId');
       const revenue = parseOptionalNumber(parameters?.['revenue']);
       const url = parseOptionalString(parameters?.['url']);

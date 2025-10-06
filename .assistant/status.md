@@ -1,18 +1,19 @@
 # Status
 
 ## Focus
-Integrate the existing MatoKit project into the refreshed `.assistant/` workflow while prioritizing observability follow-ups and queue persistence after recent reliability upgrades.
+Deliver P-010A by teaching the API/SDK to read numbered multi-site environment variables while keeping docs, tests, and operator guidance in sync.
 
 ## Now / Next / Later
 See `.assistant/plan.md` for details.
-- Now: P-002 Integrate health endpoint with monitoring.
-- Next: P-005 Persist retry queue/cache; P-006 Extend analytics coverage.
+- Now: P-010A Implement MatoKit multi-site routing with numbered environment variables.
+- Next: P-002 Integrate health endpoint with monitoring; P-005 Persist retry queue/cache; P-006 Extend analytics coverage.
 - Later: P-007 Publish Opal discovery guide; P-008 Introduce structured logging pipeline; P-009 Lean build and dependency audit.
 
 ## Risks
 - Monitoring platform undecided, leaving P-002 blocked until owners align on tooling.
 - Persistence backend for cache/queue still undecided; impacts P-005 scope and deployment expectations.
 - Rate-limit handling now exists, but alerting hooks remain manual until monitoring plan lands.
+- Operators migrating from legacy MATOKIT_SITE_* keys must adopt sequential numbering; rollout guidance being documented with this work.
 
 ## Artifacts
 - Vision & mission: `.assistant/canvas/vision.md`
@@ -26,6 +27,7 @@ See `.assistant/plan.md` for details.
 - Documented secure bearer token requirement in deployment docs and troubleshooting playbook.
 - Marked P-001, P-003, and P-004 complete after enforcing secrets, adding rate-limit handling, and introducing idempotent tracking.
 - Updated history/backlog/plan to reflect the latest reliability milestones.
+- Kicked off P-010A: added Codex Cloud task hook, updated plan/status focus, and began implementing numbered multi-site routing with docs/tests.
 
 ## Open Questions
 - Q1: Which monitoring platform (Grafana, DataDog, other) will poll `/tools/get-health-status` so we can tailor payload parsing and alert thresholds?
