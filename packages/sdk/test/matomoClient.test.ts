@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createMatomoClient } from '../src/index.js';
+import { createMatomoClient, MatomoSiteConfigurationError } from '../src/index.js';
 
 const baseUrl = 'https://matomo.example.com';
 const token = 'token';
@@ -35,7 +35,96 @@ afterEach(() => {
 describe('MatomoClient', () => {
   it('throws when siteId is missing', async () => {
     const client = createMatomoClient({ baseUrl, tokenAuth: token });
-    await expect(client.getKeyNumbers()).rejects.toThrow('siteId is required');
+    await expect(client.getKeyNumbers()).rejects.toThrow('A Matomo siteId is required.');
+  });
+
+  it('rejects named site overrides when no resolver is configured', async () => {
+    const client = createMatomoClient({ baseUrl, tokenAuth: token, defaultSiteId: 2 });
+    await expect(client.getKeyNumbers({ siteId: 'marketing' })).rejects.toThrow(
+      'Matomo site "marketing" is not configured.'
+    );
+  });
+
+  it('uses the site resolver to map friendly identifiers', async () => {
+    const fetchMock = createSequencedFetchMock([
+      { nb_visits: 12 },
+      { nb_pageviews: 20, nb_uniq_pageviews: 18 },
+    ]);
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const siteResolver = vi
+      .fn()
+      .mockReturnValue({ id: 9, key: 'BLOG', name: 'Blog' });
+
+    const client = createMatomoClient({
+      baseUrl,
+      tokenAuth: token,
+      defaultSiteId: 9,
+      siteResolver,
+    });
+
+    const result = await client.getKeyNumbers({ siteId: 'blog' });
+
+    expect(result.nb_visits).toBe(12);
+    expect(siteResolver).toHaveBeenCalledWith('blog');
+
+    const firstUrl = new URL((fetchMock.mock.calls[0] ?? [])[0] as string);
+    expect(firstUrl.searchParams.get('idSite')).toBe('9');
+  });
+
+  it('asks the site resolver for the default site when omitted', async () => {
+    const fetchMock = createSequencedFetchMock([
+      { nb_visits: 7 },
+      { nb_pageviews: 14, nb_uniq_pageviews: 10 },
+    ]);
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const siteResolver = vi.fn().mockReturnValue({ id: 5, key: 'MAIN', name: 'Main' });
+
+    const client = createMatomoClient({
+      baseUrl,
+      tokenAuth: token,
+      defaultSiteId: 5,
+      siteResolver,
+    });
+
+    await client.getKeyNumbers();
+
+    expect(siteResolver).toHaveBeenCalledWith(5);
+  });
+
+  it('propagates site configuration errors from the resolver', async () => {
+    const siteResolver = vi.fn(() => {
+      throw new MatomoSiteConfigurationError('Site not configured', 'archive');
+    });
+
+    const client = createMatomoClient({
+      baseUrl,
+      tokenAuth: token,
+      defaultSiteId: 3,
+      siteResolver,
+    });
+
+    await expect(client.getKeyNumbers({ siteId: 'archive' })).rejects.toThrow(
+      'Site not configured'
+    );
+  });
+
+  it('throws when the resolver returns an invalid result', async () => {
+    const siteResolver = vi.fn(() => ({ id: Number.NaN, key: 'BAD', name: 'Bad' }));
+
+    const client = createMatomoClient({
+      baseUrl,
+      tokenAuth: token,
+      defaultSiteId: 4,
+      siteResolver,
+    });
+
+    await expect(client.getKeyNumbers()).rejects.toThrow(
+      'Matomo site resolver returned an invalid site identifier.'
+    );
   });
 
   it('resolves default site ID when provided and merges pageview totals', async () => {

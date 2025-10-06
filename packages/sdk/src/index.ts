@@ -38,7 +38,19 @@ import {
   type TrackingIdempotencyRecord,
   type TrackingIdempotencyStore,
 } from './tracking.js';
-import { MatomoApiError, MatomoNetworkError } from './errors.js';
+import { MatomoApiError, MatomoNetworkError, MatomoSiteConfigurationError } from './errors.js';
+
+export type MatomoSiteSelector = number | string;
+
+export interface MatomoResolvedSite {
+  id: number;
+  key?: string;
+  name?: string;
+}
+
+export type MatomoSiteResolver = (
+  selector: MatomoSiteSelector | undefined
+) => MatomoResolvedSite | undefined;
 
 export interface CacheConfig {
   ttlMs?: number;
@@ -49,6 +61,7 @@ export interface MatomoClientConfig {
   baseUrl: string;
   tokenAuth: string;
   defaultSiteId?: number;
+  siteResolver?: MatomoSiteResolver;
   tracking?: {
     baseUrl?: string;
     maxRetries?: number;
@@ -61,14 +74,14 @@ export interface MatomoClientConfig {
 }
 
 export interface GetKeyNumbersInput {
-  siteId?: number;
+  siteId?: MatomoSiteSelector;
   period?: string;
   date?: string;
   segment?: string;
 }
 
 export interface GetEventsInput {
-  siteId?: number;
+  siteId?: MatomoSiteSelector;
   period?: string;
   date?: string;
   segment?: string;
@@ -79,7 +92,7 @@ export interface GetEventsInput {
 }
 
 export interface GetEntryPagesInput {
-  siteId?: number;
+  siteId?: MatomoSiteSelector;
   period?: string;
   date?: string;
   segment?: string;
@@ -87,7 +100,7 @@ export interface GetEntryPagesInput {
 }
 
 export interface GetCampaignsInput {
-  siteId?: number;
+  siteId?: MatomoSiteSelector;
   period?: string;
   date?: string;
   segment?: string;
@@ -95,7 +108,7 @@ export interface GetCampaignsInput {
 }
 
 export interface GetEcommerceOverviewInput {
-  siteId?: number;
+  siteId?: MatomoSiteSelector;
   period?: string;
   date?: string;
   segment?: string;
@@ -106,7 +119,7 @@ export interface GetEcommerceRevenueTotalsInput extends GetEcommerceOverviewInpu
 }
 
 export interface GetEventCategoriesInput {
-  siteId?: number;
+  siteId?: MatomoSiteSelector;
   period?: string;
   date?: string;
   segment?: string;
@@ -114,7 +127,7 @@ export interface GetEventCategoriesInput {
 }
 
 export interface GetDeviceTypesInput {
-  siteId?: number;
+  siteId?: MatomoSiteSelector;
   period?: string;
   date?: string;
   segment?: string;
@@ -122,7 +135,7 @@ export interface GetDeviceTypesInput {
 }
 
 export interface GetTrafficChannelsInput {
-  siteId?: number;
+  siteId?: MatomoSiteSelector;
   period?: string;
   date?: string;
   segment?: string;
@@ -130,7 +143,9 @@ export interface GetTrafficChannelsInput {
   channelType?: string;
 }
 
-export type GetGoalConversionsInput = Partial<Omit<GoalConversionsInput, 'siteId'>> & { siteId?: number };
+export type GetGoalConversionsInput = Partial<Omit<GoalConversionsInput, 'siteId'>> & {
+  siteId?: MatomoSiteSelector;
+};
 
 export type GetKeyNumbersSeriesInput = GetKeyNumbersInput;
 
@@ -159,7 +174,7 @@ export interface MatomoDiagnosticCheck {
 }
 
 export interface RunDiagnosticsInput {
-  siteId?: number;
+  siteId?: MatomoSiteSelector;
 }
 
 export interface RunDiagnosticsResult {
@@ -184,7 +199,7 @@ export interface HealthCheck {
 
 export interface GetHealthStatusInput {
   includeDetails?: boolean;
-  siteId?: number;
+  siteId?: MatomoSiteSelector;
 }
 
 const keyNumberNumericFields: Array<keyof KeyNumbers> = [
@@ -343,7 +358,11 @@ async function performDiagnosticCheck(
 
 function assertSiteId(siteId: number | undefined): asserts siteId is number {
   if (typeof siteId !== 'number' || Number.isNaN(siteId)) {
-    throw new Error('siteId is required');
+    throw new MatomoSiteConfigurationError('A Matomo siteId is required.');
+  }
+
+  if (!Number.isFinite(siteId) || siteId <= 0) {
+    throw new MatomoSiteConfigurationError('Matomo siteId must be a positive integer.', siteId);
   }
 }
 
@@ -352,6 +371,7 @@ export class MatomoClient {
   private readonly reports: ReportsService;
   private readonly tracking: TrackingService;
   private readonly defaultSiteId?: number;
+  private readonly siteResolver?: MatomoSiteResolver;
 
   constructor(config: MatomoClientConfig) {
     this.http = new MatomoHttpClient(config.baseUrl, config.tokenAuth, {
@@ -370,12 +390,72 @@ export class MatomoClient {
       idempotencyStore: config.tracking?.idempotencyStore,
     });
     this.defaultSiteId = config.defaultSiteId;
+    this.siteResolver = config.siteResolver;
   }
 
-  private resolveSiteId(override?: number) {
-    const value = override ?? this.defaultSiteId;
-    assertSiteId(value);
-    return value;
+  private resolveSiteId(override?: MatomoSiteSelector) {
+    const selector = override ?? this.defaultSiteId;
+
+    if (this.siteResolver) {
+      try {
+        const resolved = this.siteResolver(selector);
+
+        if (!resolved) {
+          const message =
+            selector === undefined
+              ? 'No default Matomo site is configured.'
+              : `Matomo site "${selector}" is not configured.`;
+          throw new MatomoSiteConfigurationError(message, this.toSelectorValue(selector));
+        }
+
+        if (typeof resolved.id !== 'number' || Number.isNaN(resolved.id)) {
+          throw new MatomoSiteConfigurationError(
+            'Matomo site resolver returned an invalid site identifier.',
+            this.toSelectorValue(selector)
+          );
+        }
+
+        return resolved.id;
+      } catch (error) {
+        if (error instanceof MatomoSiteConfigurationError) {
+          throw error;
+        }
+
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : 'Failed to resolve Matomo site.';
+        throw new MatomoSiteConfigurationError(message, this.toSelectorValue(selector));
+      }
+    }
+
+    if (typeof selector === 'string') {
+      const trimmed = selector.trim();
+      if (!trimmed) {
+        throw new MatomoSiteConfigurationError('Matomo site identifier cannot be empty.');
+      }
+
+      if (/^-?\d+$/.test(trimmed)) {
+        const numeric = Number.parseInt(trimmed, 10);
+        assertSiteId(numeric);
+        return numeric;
+      }
+
+      throw new MatomoSiteConfigurationError(
+        `Matomo site "${selector}" is not configured.`,
+        selector
+      );
+    }
+
+    assertSiteId(selector);
+    return selector;
+  }
+
+  private toSelectorValue(selector: MatomoSiteSelector | number | undefined) {
+    if (typeof selector === 'number' || typeof selector === 'string') {
+      return selector;
+    }
+    return undefined;
   }
 
   async getKeyNumbers(input: GetKeyNumbersInput = {}): Promise<KeyNumbers> {
@@ -486,14 +566,18 @@ export class MatomoClient {
   }
 
   async getMostPopularUrls(
-    input: Omit<Parameters<ReportsService['getMostPopularUrls']>[0], 'siteId'> & { siteId?: number }
+    input: Omit<Parameters<ReportsService['getMostPopularUrls']>[0], 'siteId'> & {
+      siteId?: MatomoSiteSelector;
+    }
   ): Promise<MostPopularUrl[]> {
     const siteId = this.resolveSiteId(input.siteId);
     return this.reports.getMostPopularUrls({ ...input, siteId });
   }
 
   async getTopReferrers(
-    input: Omit<Parameters<ReportsService['getTopReferrers']>[0], 'siteId'> & { siteId?: number }
+    input: Omit<Parameters<ReportsService['getTopReferrers']>[0], 'siteId'> & {
+      siteId?: MatomoSiteSelector;
+    }
   ): Promise<TopReferrer[]> {
     const siteId = this.resolveSiteId(input.siteId);
     return this.reports.getTopReferrers({ ...input, siteId });
@@ -614,21 +698,21 @@ export class MatomoClient {
   }
 
   async trackPageview(
-    input: Omit<TrackPageviewInput, 'siteId'> & { siteId?: number }
+    input: Omit<TrackPageviewInput, 'siteId'> & { siteId?: MatomoSiteSelector }
   ): Promise<TrackPageviewResult> {
     const siteId = this.resolveSiteId(input.siteId);
     return this.tracking.trackPageview({ ...input, siteId });
   }
 
   async trackEvent(
-    input: Omit<TrackEventInput, 'siteId'> & { siteId?: number }
+    input: Omit<TrackEventInput, 'siteId'> & { siteId?: MatomoSiteSelector }
   ): Promise<TrackResult> {
     const siteId = this.resolveSiteId(input.siteId);
     return this.tracking.trackEvent({ ...input, siteId });
   }
 
   async trackGoal(
-    input: Omit<TrackGoalInput, 'siteId'> & { siteId?: number }
+    input: Omit<TrackGoalInput, 'siteId'> & { siteId?: MatomoSiteSelector }
   ): Promise<TrackResult> {
     const siteId = this.resolveSiteId(input.siteId);
     return this.tracking.trackGoal({ ...input, siteId });
@@ -910,4 +994,5 @@ export {
   MatomoServerError,
   MatomoNetworkError,
   MatomoParseError,
+  MatomoSiteConfigurationError,
 } from './errors.js';

@@ -1,36 +1,46 @@
-import { EventEmitter } from 'node:events';
-
-import type { Express } from 'express';
 import httpMocks from 'node-mocks-http';
+// eslint-disable-next-line import/order
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+const { mockMatomoClient, createMatomoClientMock } = vi.hoisted(() => {
+  const client = {
+    getKeyNumbers: vi.fn(),
+    getKeyNumbersSeries: vi.fn(),
+    getMostPopularUrls: vi.fn(),
+    getTopReferrers: vi.fn(),
+    getEntryPages: vi.fn(),
+    getCampaigns: vi.fn(),
+    getEvents: vi.fn(),
+    getEcommerceOverview: vi.fn(),
+    getEcommerceRevenueTotals: vi.fn(),
+    getEventCategories: vi.fn(),
+    getDeviceTypes: vi.fn(),
+    getTrafficChannels: vi.fn(),
+    getGoalConversions: vi.fn(),
+    runDiagnostics: vi.fn(),
+    trackPageview: vi.fn(),
+    trackEvent: vi.fn(),
+    trackGoal: vi.fn(),
+  };
 
-const mockMatomoClient = {
-  getKeyNumbers: vi.fn(),
-  getKeyNumbersSeries: vi.fn(),
-  getMostPopularUrls: vi.fn(),
-  getTopReferrers: vi.fn(),
-  getEntryPages: vi.fn(),
-  getCampaigns: vi.fn(),
-  getEvents: vi.fn(),
-  getEcommerceOverview: vi.fn(),
-  getEcommerceRevenueTotals: vi.fn(),
-  getEventCategories: vi.fn(),
-  getDeviceTypes: vi.fn(),
-  getTrafficChannels: vi.fn(),
-  getGoalConversions: vi.fn(),
-  runDiagnostics: vi.fn(),
-  trackPageview: vi.fn(),
-  trackEvent: vi.fn(),
-  trackGoal: vi.fn(),
-};
+  return {
+    mockMatomoClient: client,
+    createMatomoClientMock: vi.fn(() => client),
+  };
+});
 
-const createMatomoClientMock = vi.fn(() => mockMatomoClient);
+vi.mock('@matokit/sdk', async () => {
+  const actual = await vi.importActual<typeof import('@matokit/sdk')>('@matokit/sdk');
+  return {
+    ...actual,
+    createMatomoClient: createMatomoClientMock,
+  };
+});
 
-vi.mock('@matokit/sdk', () => ({
-  createMatomoClient: createMatomoClientMock,
-}));
+import * as matokitSdk from '@matokit/sdk';
 
-async function createApp(): Promise<Express> {
+const { MatomoSiteConfigurationError } = matokitSdk;
+
+async function createApp(): Promise<import('express').Express> {
   const module = await import('../src/server.js');
   return module.buildServer();
 }
@@ -51,6 +61,8 @@ async function invoke(app: Express, options: InvokeOptions): Promise<{ status: n
     headers: { 'content-type': 'application/json', ...headers },
     body,
   });
+
+  const { EventEmitter } = await import('node:events');
 
   const res = httpMocks.createResponse({ eventEmitter: EventEmitter });
 
@@ -102,6 +114,70 @@ afterEach(() => {
   delete process.env.MATOMO_TOKEN;
   delete process.env.MATOMO_DEFAULT_SITE_ID;
   delete process.env.OPAL_BEARER_TOKEN;
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith('MATOKIT_SITE_')) {
+      delete process.env[key];
+    }
+  }
+});
+
+describe('site configuration', () => {
+  it('configures a site resolver when MATOKIT_SITE variables are set', async () => {
+    process.env.MATOKIT_SITE_MAIN_ID = '3';
+    process.env.MATOKIT_SITE_MAIN_NAME = 'Main Site';
+    process.env.MATOKIT_SITE_BLOG_ID = '4';
+    process.env.MATOKIT_SITE_BLOG_NAME = 'Blog';
+    process.env.MATOMO_DEFAULT_SITE_ID = '3';
+
+    await createApp();
+
+    const config = createMatomoClientMock.mock.calls[0]?.[0] as {
+      siteResolver?: (selector?: unknown) => unknown;
+    };
+    expect(typeof config?.siteResolver).toBe('function');
+
+    const resolver = config?.siteResolver as (selector?: unknown) => unknown;
+    expect(resolver(undefined)).toEqual({ id: 3, key: 'MAIN', name: 'Main Site' });
+    expect(resolver('blog')).toEqual({ id: 4, key: 'BLOG', name: 'Blog' });
+  });
+
+  it('passes string site identifiers to the Matomo client', async () => {
+    process.env.MATOKIT_SITE_MAIN_ID = '3';
+    process.env.MATOKIT_SITE_MAIN_NAME = 'Main Site';
+    process.env.MATOMO_DEFAULT_SITE_ID = '3';
+
+    const app = await createApp();
+    mockMatomoClient.getKeyNumbers.mockResolvedValue({ nb_visits: 1 });
+
+    await invoke(app, {
+      url: '/tools/get-key-numbers',
+      headers: { authorization: 'Bearer test-token' },
+      body: { parameters: { siteId: 'main' } },
+    });
+
+    expect(mockMatomoClient.getKeyNumbers).toHaveBeenCalledWith({
+      siteId: 'main',
+      period: undefined,
+      date: undefined,
+      segment: undefined,
+    });
+  });
+
+  it('returns a 400 response when the Matomo client rejects with a site configuration error', async () => {
+    const app = await createApp();
+    mockMatomoClient.getKeyNumbers.mockRejectedValue(
+      new MatomoSiteConfigurationError('Matomo site "marketing" is not configured.', 'marketing')
+    );
+
+    const response = await invoke(app, {
+      url: '/tools/get-key-numbers',
+      headers: { authorization: 'Bearer test-token' },
+      body: { parameters: { siteId: 'marketing' } },
+    });
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: 'Matomo site "marketing" is not configured.' });
+  });
 });
 
 describe('tool endpoints', () => {
@@ -202,7 +278,7 @@ describe('tool endpoints', () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual(diagnostics);
-    expect(mockMatomoClient.runDiagnostics).toHaveBeenCalledWith({ siteId: 7 });
+    expect(mockMatomoClient.runDiagnostics).toHaveBeenCalledWith({ siteId: '7' });
   });
 
   it('forwards referrer requests with defaults when omitted', async () => {
