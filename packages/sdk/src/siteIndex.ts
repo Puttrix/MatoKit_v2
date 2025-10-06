@@ -47,6 +47,52 @@ function assertRecord(value: unknown, errorMessage: string): Record<string, unkn
   return value as Record<string, unknown>;
 }
 
+function assertSiteDefinition(value: unknown, context: string): MatomoSiteDefinition {
+  const record = assertRecord(value, `Site definition for ${context} must be an object`);
+  return record as unknown as MatomoSiteDefinition;
+}
+
+function coerceOptionalSiteId(value: unknown, context: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return coerceSiteId(value, context);
+}
+
+function assertSiteIndexDefinition(
+  value: Record<string, unknown>,
+  context: string
+): MatomoSiteIndexDefinition {
+  if (!('sites' in value)) {
+    throw new Error(`${context} must include a "sites" property`);
+  }
+
+  const defaultSiteId = coerceOptionalSiteId(value.defaultSiteId, `${context} defaultSiteId`);
+  const rawSites = value.sites;
+
+  if (Array.isArray(rawSites)) {
+    return {
+      defaultSiteId,
+      sites: rawSites.map((entry, idx) => assertSiteDefinition(entry, `${context} site entry at index ${idx}`)),
+    };
+  }
+
+  if (!rawSites || typeof rawSites !== 'object') {
+    throw new Error(`${context} "sites" must be an object or array`);
+  }
+
+  const siteRecord: Record<string, MatomoSiteDefinition> = {};
+  for (const [key, entry] of Object.entries(rawSites)) {
+    siteRecord[key] = assertSiteDefinition(entry, `${context} site entry for key "${key}"`);
+  }
+
+  return {
+    defaultSiteId,
+    sites: siteRecord,
+  };
+}
+
 function coerceSiteId(value: unknown, context: string): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -279,11 +325,9 @@ export function loadSiteIndexFromFile(filePath: string): MatomoSiteIndex {
   }
 
   const data = assertRecord(parsed, `Site index at ${resolved} must be a JSON object`);
-  if (!('sites' in data)) {
-    throw new Error(`Site index at ${resolved} must include a "sites" property`);
-  }
+  const definition = assertSiteIndexDefinition(data, `Site index at ${resolved}`);
 
-  return normalizeSiteIndex(data as MatomoSiteIndexDefinition);
+  return normalizeSiteIndex(definition);
 }
 
 export function getSiteMetadata(index: MatomoSiteIndex, siteId: number): MatomoSiteMetadata | undefined {
