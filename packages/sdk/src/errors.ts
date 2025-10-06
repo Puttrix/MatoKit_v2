@@ -186,6 +186,16 @@ export class MatomoServerError extends MatomoApiError {
   }
 }
 
+export class MatomoSiteConfigurationError extends Error {
+  readonly selector?: string | number;
+
+  constructor(message: string, selector?: string | number) {
+    super(message);
+    this.name = this.constructor.name;
+    this.selector = selector;
+  }
+}
+
 export type MatomoErrorResult = {
   result?: unknown;
   message?: unknown;
