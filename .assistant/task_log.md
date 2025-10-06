@@ -1,5 +1,9 @@
 # Task Log
 ## 2025-10-02
+- tool: bash
+  args: apply_patch backlog/doc updates for P-010A multi-site numbering
+  result: Added backlog item P-010A and documented sequential MATOKIT_SITE_<INDEX> env schema in README and env templates.
+  artifacts: .assistant/backlog.md, README.md, stack.env, deploy/matokit.env.example
 - tool: none
   args: Reviewed `.assistant/backlog.md` and `.assistant/plan.md`
   result: Confirmed P-001 (secure bearer tokens) and P-002 (health monitoring integration) as immediate priorities for this session.
@@ -52,4 +56,3 @@
   args: Documented Matomo Cloud context for bug B-001
   result: Acceptance criteria now highlight that the object-vs-array parsing issue reproduces on Matomo Cloud deployments only.
   artifacts: .assistant/backlog.md
-

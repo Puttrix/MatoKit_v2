@@ -70,8 +70,8 @@ This project provides a lightweight SDK and Express-based tool service that make
 | `MATOMO_BASE_URL` | Base URL to your Matomo instance (should include host, optional path). |
 | `MATOMO_TOKEN` | Matomo `token_auth` used for Reporting API calls. |
 | `MATOMO_DEFAULT_SITE_ID` | Default `idSite` used when tool requests omit `siteId`. |
-| `MATOKIT_SITE_<KEY>_ID` | Optional. Numeric Matomo `idSite` associated with the site key `<KEY>` (uppercase letters/numbers/underscores). Define alongside `MATOKIT_SITE_<KEY>_NAME`. |
-| `MATOKIT_SITE_<KEY>_NAME` | Optional. Friendly display name for the site referenced by `MATOKIT_SITE_<KEY>_ID`. Up to 25 site definitions are supported. |
+| `MATOKIT_SITE_<INDEX>_ID` | Optional. Numeric Matomo `idSite` associated with the numbered site `<INDEX>` (0-based, sequential). Define alongside `MATOKIT_SITE_<INDEX>_NAME`. |
+| `MATOKIT_SITE_<INDEX>_NAME` | Optional. Friendly display name for the site referenced by `MATOKIT_SITE_<INDEX>_ID`. Up to 25 site definitions are supported. |
 | `OPAL_BEARER_TOKEN` | Bearer token required on `/tools/*` endpoints (generate securely, e.g., `openssl rand -hex 32`). |
 | `PORT` | Listener port for the API service (default `4000`). |
 
@@ -79,8 +79,8 @@ This project provides a lightweight SDK and Express-based tool service that make
 
 MatoKit can index multiple Matomo websites within a single container by pairing site IDs with human-readable names. Each site uses a shared Matomo base URL and token, while the service validates incoming `siteId` selectors against the configured registry.
 
-1. Choose an uppercase key for each site (letters, numbers, or underscores).
-2. Define `MATOKIT_SITE_<KEY>_ID` and `MATOKIT_SITE_<KEY>_NAME` together.
+1. Assign sequential zero-based indexes (`0`, `1`, `2`, ...) for each configured site.
+2. Define `MATOKIT_SITE_<INDEX>_ID` and `MATOKIT_SITE_<INDEX>_NAME` together for every index in use (no gaps).
 3. Ensure `MATOMO_DEFAULT_SITE_ID` matches one of the configured IDs.
 4. Provide no more than `25` site definitions (extra entries are rejected at startup).
 
@@ -89,13 +89,13 @@ MATOMO_BASE_URL=https://matomo.example.com
 MATOMO_TOKEN=token_auth_here
 MATOMO_DEFAULT_SITE_ID=3
 
-# Site catalog
-MATOKIT_SITE_MAIN_ID=3
-MATOKIT_SITE_MAIN_NAME=Marketing Site
-MATOKIT_SITE_BLOG_ID=4
-MATOKIT_SITE_BLOG_NAME=Blog
-MATOKIT_SITE_PARTNER_ID=7
-MATOKIT_SITE_PARTNER_NAME=Partner Portal
+# Site catalog (sequential indexes)
+MATOKIT_SITE_0_ID=3
+MATOKIT_SITE_0_NAME=Marketing Site
+MATOKIT_SITE_1_ID=4
+MATOKIT_SITE_1_NAME=Blog
+MATOKIT_SITE_2_ID=7
+MATOKIT_SITE_2_NAME=Partner Portal
 ```
 
 When the registry is configured:

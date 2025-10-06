@@ -31,6 +31,10 @@
       tags: feature,config,multi-tenant  priority: high  est: 2d
       deps: ADR-0001
       accepts: As a deployment operator, I can configure multiple websites within one Matomo instance by defining environment-variable pairs for each siteId and site name (shared base URL) so the containerized app routes events correctly, with docs covering the env schema and limits.
+- [ ] P-010A Implement MatoKit multi-site routing with numbered environment variables
+      tags: feature,config,multi-tenant  priority: high  est: 2d
+      deps: ADR-0001, P-010
+      accepts: API/SDK maps site names to Matomo siteIds using numbered env pairs (`MATOKIT_SITE_{N}_NAME`/`MATOKIT_SITE_{N}_ID`), documentation explains how to add/remove sites with sequential numbering and any limits, and verification covers fetching data for at least two configured sites with the new routing.
 - [ ] P-007 Publish Opal discovery integration guide
       tags: docs,dx  priority: low  est: 1d
       deps: ADR-0001
