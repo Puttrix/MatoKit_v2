@@ -1,4 +1,13 @@
 # Task Log
+## 2025-10-03
+- tool: none
+  args: Created Codex Cloud task CC-010A linked to backlog item P-010A and aligned plan/status focus with the multi-site effort
+  result: Backlog now references CC-010A, and plan/status highlight P-010A as the current priority.
+  artifacts: .assistant/backlog.md, .assistant/plan.md, .assistant/status.md
+- tool: bash
+  args: Implemented numbered MATOKIT_SITE resolver with documentation and test coverage
+  result: Updated site registry parsing, refreshed deployment docs/templates, added multi-site routing tests, and verified API/SDK suites.
+  artifacts: packages/api/src/siteRegistry.ts, packages/api/test/siteRegistry.test.ts, packages/api/test/server.test.ts, README.md, stack.env, deploy/matokit.env.example
 ## 2025-10-02
 - tool: bash
   args: apply_patch backlog/doc updates for P-010A multi-site numbering
