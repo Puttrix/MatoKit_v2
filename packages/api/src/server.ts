@@ -620,7 +620,7 @@ export function buildServer() {
   });
 
   app.use(
-    (error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    (error: unknown, _req: Request, res: Response) => {
       if (error instanceof MatomoSiteConfigurationError) {
         return res.status(400).json({ error: error.message });
       }

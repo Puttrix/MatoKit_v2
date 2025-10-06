@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-
 import { MatomoSiteConfigurationError } from '@matokit/sdk';
 
 import { buildSiteRegistry, MATOKIT_MAX_SITES } from '../src/siteRegistry.js';

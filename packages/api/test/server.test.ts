@@ -1,9 +1,6 @@
-import { EventEmitter } from 'node:events';
-
-import type { Express } from 'express';
 import httpMocks from 'node-mocks-http';
+// eslint-disable-next-line import/order
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 const { mockMatomoClient, createMatomoClientMock } = vi.hoisted(() => {
   const client = {
     getKeyNumbers: vi.fn(),
@@ -43,7 +40,7 @@ import * as matokitSdk from '@matokit/sdk';
 
 const { MatomoSiteConfigurationError } = matokitSdk;
 
-async function createApp(): Promise<Express> {
+async function createApp(): Promise<import('express').Express> {
   const module = await import('../src/server.js');
   return module.buildServer();
 }
@@ -64,6 +61,8 @@ async function invoke(app: Express, options: InvokeOptions): Promise<{ status: n
     headers: { 'content-type': 'application/json', ...headers },
     body,
   });
+
+  const { EventEmitter } = await import('node:events');
 
   const res = httpMocks.createResponse({ eventEmitter: EventEmitter });
 
