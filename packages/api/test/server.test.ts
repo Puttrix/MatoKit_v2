@@ -27,10 +27,12 @@ const mockMatomoClient = {
 const createMatomoClientMock = vi.fn(() => mockMatomoClient);
 const loadSiteIndexFromFileMock = vi.fn();
 const loadSiteIndexFromEnvMock = vi.fn();
+const loadSiteIndexFromJsonMock = vi.fn();
 
 vi.mock('@matokit/sdk', () => ({
   createMatomoClient: createMatomoClientMock,
   loadSiteIndexFromEnv: loadSiteIndexFromEnvMock,
+  loadSiteIndexFromJson: loadSiteIndexFromJsonMock,
   loadSiteIndexFromFile: loadSiteIndexFromFileMock,
 }));
 
@@ -80,6 +82,7 @@ beforeEach(() => {
   loadSiteIndexFromFileMock.mockReset();
   loadSiteIndexFromFileMock.mockReturnValue({ defaultSiteId: 1, sites: new Map() });
   loadSiteIndexFromEnvMock.mockReset();
+  loadSiteIndexFromJsonMock.mockReset();
   mockMatomoClient.getKeyNumbers.mockReset();
   mockMatomoClient.getKeyNumbersSeries.mockReset();
   mockMatomoClient.getMostPopularUrls.mockReset();
@@ -112,6 +115,7 @@ afterEach(() => {
   delete process.env.MATOMO_DEFAULT_SITE_ID;
   delete process.env.OPAL_BEARER_TOKEN;
   delete process.env.MATOKIT_SITE_INDEX_PATH;
+  delete process.env.MATOKIT_SITE_INDEX_JSON;
   delete process.env.MATOMO_SITE_MAP;
 });
 
@@ -157,6 +161,7 @@ describe('tool endpoints', () => {
 
     await createApp();
 
+    expect(loadSiteIndexFromJsonMock).not.toHaveBeenCalled();
     expect(loadSiteIndexFromEnvMock).not.toHaveBeenCalled();
     expect(loadSiteIndexFromFileMock).toHaveBeenCalledWith('/etc/matomo/site-index.json');
     expect(createMatomoClientMock).toHaveBeenCalledWith(
@@ -171,7 +176,27 @@ describe('tool endpoints', () => {
 
     await createApp();
 
+    expect(loadSiteIndexFromJsonMock).not.toHaveBeenCalled();
     expect(loadSiteIndexFromEnvMock).toHaveBeenCalledWith('4:Primary', { defaultSiteId: 1 });
+    expect(loadSiteIndexFromFileMock).not.toHaveBeenCalled();
+    expect(createMatomoClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ siteIndex: fakeIndex })
+    );
+  });
+
+  it('prefers MATOKIT_SITE_INDEX_JSON when provided', async () => {
+    const fakeIndex = { defaultSiteId: 9, sites: new Map([[9, { siteId: 9, name: 'Inline' }]]) } as unknown;
+    loadSiteIndexFromJsonMock.mockReturnValue(fakeIndex);
+    process.env.MATOKIT_SITE_INDEX_JSON = JSON.stringify({ sites: { '9': { name: 'Inline' } } });
+    process.env.MATOMO_SITE_MAP = '1:Other';
+    process.env.MATOKIT_SITE_INDEX_PATH = '/etc/matomo/other.json';
+
+    await createApp();
+
+    expect(loadSiteIndexFromJsonMock).toHaveBeenCalledWith(
+      JSON.stringify({ sites: { '9': { name: 'Inline' } } })
+    );
+    expect(loadSiteIndexFromEnvMock).not.toHaveBeenCalled();
     expect(loadSiteIndexFromFileMock).not.toHaveBeenCalled();
     expect(createMatomoClientMock).toHaveBeenCalledWith(
       expect.objectContaining({ siteIndex: fakeIndex })

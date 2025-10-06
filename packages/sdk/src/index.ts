@@ -1031,6 +1031,7 @@ export type { MatomoRateLimitOptions } from './httpClient.js';
 export {
   loadSiteIndexFromFile,
   loadSiteIndexFromEnv,
+  loadSiteIndexFromJson,
   normalizeSiteIndex,
   getSiteMetadata,
 } from './siteIndex.js';

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   loadSiteIndexFromEnv,
   loadSiteIndexFromFile,
+  loadSiteIndexFromJson,
   normalizeSiteIndex,
   type MatomoSiteIndex,
 } from '../src/siteIndex.js';
@@ -105,5 +106,35 @@ describe('site index utilities', () => {
   it('throws when environment entries are malformed', () => {
     expect(() => loadSiteIndexFromEnv('1,2:')).toThrow(/must be formatted/);
     expect(() => loadSiteIndexFromEnv('3:   ')).toThrow(/must be a non-empty string/);
+  });
+
+  it('parses a full site index from an inline JSON string', () => {
+    const json = JSON.stringify({
+      defaultSiteId: 1,
+      sites: {
+        '1': {
+          name: 'Primary',
+          baseUrl: 'https://matomo.primary.example',
+          tokenAuth: 'primary-token',
+        },
+        '2': {
+          name: 'Docs',
+          tracking: { baseUrl: 'https://collector.example/matomo.php' },
+        },
+      },
+    });
+
+    const index = loadSiteIndexFromJson(json);
+
+    expect(index.defaultSiteId).toBe(1);
+    expect(index.sites.get(1)?.tokenAuth).toBe('primary-token');
+    expect(index.sites.get(2)?.tracking?.baseUrl).toBe(
+      'https://collector.example/matomo.php'
+    );
+  });
+
+  it('throws when inline JSON is invalid', () => {
+    expect(() => loadSiteIndexFromJson('')).toThrow(/non-empty string/);
+    expect(() => loadSiteIndexFromJson('not-json')).toThrow(/Failed to parse/);
   });
 });

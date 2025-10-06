@@ -303,6 +303,37 @@ export function loadSiteIndexFromEnv(
   });
 }
 
+function parseSiteIndexJson(json: string, context: string): MatomoSiteIndex {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(json);
+  } catch (error) {
+    throw new Error(
+      `Failed to parse site index JSON from ${context}: ${(error as Error).message}`
+    );
+  }
+
+  const data = assertRecord(
+    parsed,
+    `Site index loaded from ${context} must be a JSON object`
+  );
+  const definition = assertSiteIndexDefinition(
+    data,
+    `Site index loaded from ${context}`
+  );
+
+  return normalizeSiteIndex(definition);
+}
+
+export function loadSiteIndexFromJson(json: string): MatomoSiteIndex {
+  if (typeof json !== 'string' || json.trim().length === 0) {
+    throw new Error('Site index JSON string must be a non-empty string');
+  }
+
+  return parseSiteIndexJson(json, 'MATOKIT_SITE_INDEX_JSON');
+}
+
 export function loadSiteIndexFromFile(filePath: string): MatomoSiteIndex {
   if (!filePath || typeof filePath !== 'string') {
     throw new Error('Site index path must be a non-empty string');
@@ -317,17 +348,7 @@ export function loadSiteIndexFromFile(filePath: string): MatomoSiteIndex {
     throw new Error(`Failed to read site index from ${resolved}: ${(error as Error).message}`);
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fileContents);
-  } catch (error) {
-    throw new Error(`Failed to parse site index JSON at ${resolved}: ${(error as Error).message}`);
-  }
-
-  const data = assertRecord(parsed, `Site index at ${resolved} must be a JSON object`);
-  const definition = assertSiteIndexDefinition(data, `Site index at ${resolved}`);
-
-  return normalizeSiteIndex(definition);
+  return parseSiteIndexJson(fileContents, resolved);
 }
 
 export function getSiteMetadata(index: MatomoSiteIndex, siteId: number): MatomoSiteMetadata | undefined {

@@ -5,7 +5,12 @@ import { fileURLToPath } from 'node:url';
 import type { NextFunction, Request, Response } from 'express';
 import express from 'express';
 import { Parameter, ParameterType, ToolsService } from '@optimizely-opal/opal-tools-sdk';
-import { createMatomoClient, loadSiteIndexFromEnv, loadSiteIndexFromFile } from '@matokit/sdk';
+import {
+  createMatomoClient,
+  loadSiteIndexFromEnv,
+  loadSiteIndexFromFile,
+  loadSiteIndexFromJson,
+} from '@matokit/sdk';
 
 function parseOptionalNumber(value: unknown): number | undefined {
   if (value === undefined || value === null || value === '') {
@@ -67,18 +72,22 @@ export function buildServer() {
   });
 
   const defaultSiteId = parseOptionalNumber(process.env.MATOMO_DEFAULT_SITE_ID ?? '1');
+  const inlineSiteIndexJson = process.env.MATOKIT_SITE_INDEX_JSON?.trim();
   const siteIndexPath = process.env.MATOKIT_SITE_INDEX_PATH?.trim();
   const siteMapEnv = process.env.MATOMO_SITE_MAP?.trim();
   const parsedDefaultSiteId = defaultSiteId ?? undefined;
 
-  const siteIndex = siteMapEnv
-    ? loadSiteIndexFromEnv(
-        siteMapEnv,
-        parsedDefaultSiteId !== undefined ? { defaultSiteId: parsedDefaultSiteId } : undefined
-      )
-    : siteIndexPath
-      ? loadSiteIndexFromFile(siteIndexPath)
-      : undefined;
+  // Prefer inline JSON for container deployments, then simple env map, finally on-disk file.
+  const siteIndex = inlineSiteIndexJson
+    ? loadSiteIndexFromJson(inlineSiteIndexJson)
+    : siteMapEnv
+      ? loadSiteIndexFromEnv(
+          siteMapEnv,
+          parsedDefaultSiteId !== undefined ? { defaultSiteId: parsedDefaultSiteId } : undefined
+        )
+      : siteIndexPath
+        ? loadSiteIndexFromFile(siteIndexPath)
+        : undefined;
 
   const matomoClient = createMatomoClient({
     baseUrl: process.env.MATOMO_BASE_URL || 'https://matomo.surputte.se',

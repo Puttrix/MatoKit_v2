@@ -72,6 +72,7 @@ PORT=4000
 | `MATOMO_TOKEN` | Matomo `token_auth` used for Reporting API calls. |
 | `MATOMO_DEFAULT_SITE_ID` | Default `idSite` used when tool requests omit `siteId`. |
 | `MATOMO_SITE_MAP` | Comma-separated `<siteId>:<name>` pairs for Matomo sites that share the same base URL/token. |
+| `MATOKIT_SITE_INDEX_JSON` | Inline JSON definition of the full site index (useful for container-only deployments). |
 | `MATOKIT_SITE_INDEX_PATH` | Absolute or relative path to the deployment's site index JSON file. |
 | `OPAL_BEARER_TOKEN` | Bearer token required on `/tools/*` endpoints (generate securely, e.g., `openssl rand -hex 32`). |
 | `PORT` | Listener port for the API service (default `4000`). |
@@ -82,9 +83,13 @@ For Matomo instances that host multiple sites on the same base URL and token, de
 of `<siteId>:<name>` pairs (for example, `MATOMO_SITE_MAP=1:Marketing,2:Docs`). The API service reads this variable at startup
 and publishes the site catalog to assistants so they can route requests with friendly names.
 
-If you need per-site overrides (different tokens, tracking collectors, metadata, etc.), set `MATOKIT_SITE_INDEX_PATH` to a JSON
-document that lists every Matomo site your deployment needs to serve. The site index provides a single source of truth for site
-names, API credentials, and tracking overrides so assistants can route requests to the correct Matomo context.
+Containerized deployments that cannot mount an additional config volume can inline the full JSON definition via
+`MATOKIT_SITE_INDEX_JSON`. Provide the JSON string exactly as it appears in `deploy/site-index.example.json` (quotes included)
+and the service will parse and normalize it before wiring the index into the SDK.
+
+If you prefer to manage the index as a file—either because the JSON is large or you are storing it with your infrastructure
+configuration—set `MATOKIT_SITE_INDEX_PATH` to the location of the JSON document. The site index provides a single source of truth
+for site names, API credentials, and tracking overrides so assistants can route requests to the correct Matomo context.
 
 1. Copy `deploy/site-index.example.json` to your secret store or configuration repository.
 2. Update each entry under `sites` with the Matomo `siteId`, a friendly `name`, and any overrides:
@@ -94,8 +99,9 @@ names, API credentials, and tracking overrides so assistants can route requests 
 3. Set `defaultSiteId` to the site assistants should use when a request omits `siteId`.
 4. Point `MATOKIT_SITE_INDEX_PATH` at the file (the service accepts absolute or relative paths).
 
-The SDK also exports `loadSiteIndexFromEnv`, `loadSiteIndexFromFile`, and `normalizeSiteIndex` helpers for custom tooling should
-you need to inspect the index outside of the API service.
+The SDK also exports `loadSiteIndexFromEnv`, `loadSiteIndexFromJson`, `loadSiteIndexFromFile`, and `normalizeSiteIndex` helpers for
+custom tooling should you need to inspect the index outside of the API service. Environment loading precedence is:
+`MATOKIT_SITE_INDEX_JSON` → `MATOMO_SITE_MAP` → `MATOKIT_SITE_INDEX_PATH`.
 
 ## Available Scripts
 From the repo root:
